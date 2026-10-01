@@ -1,12 +1,13 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
-const { CohereClient } = require('cohere-ai');
+const { CohereClientV2 } = require('cohere-ai');
 const http = require('http');
 
-// Serwer HTTP utrzymujący aktywność usługi na Render
+// Keep Render free instance awake
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
-const cohere = new CohereClient({
+// Initialize using Cohere V2 Client
+const cohere = new CohereClientV2({
     token: process.env.COHERE_API_KEY,
 });
 
@@ -33,7 +34,6 @@ async function getAIResponse(conversationHistory) {
         throw new Error("Missing COHERE_API_KEY environment variable in Render.");
     }
 
-    // Formatowanie historii wiadomości dla API v2
     const messages = [
         { role: 'system', content: SYSTEM_PERSONALITY },
         ...conversationHistory.map(msg => ({
@@ -42,15 +42,20 @@ async function getAIResponse(conversationHistory) {
         }))
     ];
 
-    // Wywołanie v2/chat zgodne z nowymi modelami
-    const response = await cohere.v2.chat({
+    const response = await cohere.chat({
         model: MODEL_NAME,
         messages: messages,
         temperature: 0.1,
         maxTokens: 300,
     });
 
-    return response.message?.content?.[0]?.text;
+    // Extract text safely from v2 content array
+    const textOutput = response.message?.content?.[0]?.text;
+    if (!textOutput) {
+        throw new Error("Received empty text output from AI model.");
+    }
+
+    return textOutput;
 }
 
 client.on('messageCreate', async (message) => {
