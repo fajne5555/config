@@ -5,9 +5,9 @@ const http = require('http');
 // Keep Render free instance awake
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
-// Azure Inference API endpoint for GitHub Models
-const API_URL = "https://models.inference.ai.azure.com/chat/completions";
-const MODEL_NAME = "gpt-4o-mini";
+// GitHub Models native inference endpoint and model name format
+const API_URL = "https://models.github.ai/inference/chat/completions";
+const MODEL_NAME = "openai/gpt-4o-mini";
 
 const SYSTEM_PERSONALITY = `You are a concise, strictly factual Discord AI assistant.
 RULES:
@@ -52,19 +52,18 @@ async function getAIResponse(conversationHistory) {
     const responseText = await response.text();
 
     if (!response.ok) {
-        throw new Error(`GitHub API Error (${response.status}): ${responseText}`);
+        throw new Error(`GitHub Models API Error (${response.status}): ${responseText}`);
     }
 
-    // Guard against plain text "OK" responses
     let data;
     try {
         data = JSON.parse(responseText);
     } catch (e) {
-        throw new Error(`GitHub returned non-JSON response: "${responseText.trim()}"`);
+        throw new Error(`Received unexpected text from API: "${responseText.trim()}"`);
     }
 
     if (!data.choices?.[0]?.message?.content) {
-        throw new Error("Received empty or malformed completion payload from API.");
+        throw new Error("Received empty or malformed response choices from GitHub Models.");
     }
 
     return data.choices[0].message.content;
