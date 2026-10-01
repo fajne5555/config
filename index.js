@@ -3,18 +3,20 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const Groq = require('groq-sdk');
 const http = require('http');
 
-// Keep Render web service active via UptimeRobot
+// Keep Render service alive via UptimeRobot
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // =========================================================================
-// 🎭 CHANGE YOUR BOT'S PERSONALITY HERE
+// 🎭 EDIT PERSONALITY & MEMORY RULES HERE
 // =========================================================================
-const SYSTEM_PERSONALITY = `You are a sigma larper and heavily respect Kaileb Smith.
+const SYSTEM_PERSONALITY = `You are a witty, concise Discord AI assistant. 
 RULES:
-1. ALWAYS respond in English unless specifically requested otherwise.
-2. Keep responses brief, clever, and under 400 characters.`;
+1. ALWAYS reply in English unless specifically requested otherwise.
+2. Focus strictly on answering the USER'S LATEST MESSAGE. Use past messages ONLY for immediate context.
+3. Do not bleed topics or information from past conversation into new, unrelated questions.
+4. Keep responses brief and under 400 characters.`;
 // =========================================================================
 
 const client = new Client({
@@ -30,7 +32,6 @@ client.once('clientReady', () => {
 });
 
 async function getGroqResponse(conversationHistory) {
-    // Dynamic model fetching ensures it uses active models on your Groq key
     let modelList = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
     try {
         const response = await groq.models.list();
@@ -41,7 +42,7 @@ async function getGroqResponse(conversationHistory) {
             if (activeModels.length > 0) modelList = activeModels;
         }
     } catch (e) {
-        // Fallback to defaults if list endpoint is slow
+        // Fallback to default model array
     }
 
     let lastError = null;
@@ -54,8 +55,8 @@ async function getGroqResponse(conversationHistory) {
                     ...conversationHistory
                 ],
                 model: modelName,
-                temperature: 0.7,
-                max_tokens: 500
+                temperature: 0.5, // Lower temperature reduces topic bleeding and hallucinations
+                max_tokens: 400
             });
 
             const text = completion.choices[0]?.message?.content;
@@ -70,16 +71,16 @@ async function getGroqResponse(conversationHistory) {
 }
 
 client.on('messageCreate', async (message) => {
-    // Prevent infinite loops by ignoring the bot's own messages
+    // Prevent infinite loops
     if (message.author.id === client.user.id) return;
 
     try {
         await message.channel.sendTyping();
 
-        // 1. Fetch the last 10 messages in the channel for memory
-        const pastMessages = await message.channel.messages.fetch({ limit: 10 });
+        // 1. Fetch only the last 4 messages to keep memory focused on the immediate context
+        const pastMessages = await message.channel.messages.fetch({ limit: 4 });
         
-        // 2. Format chronological conversation context for Groq
+        // 2. Format chronological conversation history
         const conversationHistory = [];
         pastMessages.reverse().forEach(msg => {
             if (!msg.content) return;
@@ -87,7 +88,7 @@ client.on('messageCreate', async (message) => {
             conversationHistory.push({ role, content: msg.content });
         });
 
-        // 3. Generate completion with context & custom personality
+        // 3. Generate response
         let responseText = await getGroqResponse(conversationHistory);
 
         if (responseText) {
