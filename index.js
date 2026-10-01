@@ -18,10 +18,10 @@ const PREFERRED_MODELS = [
 // =========================================================================
 // 🎭 EDIT PERSONALITY & RULES HERE
 // =========================================================================
-const SYSTEM_PERSONALITY = `You are a smart sigma blud.
+const SYSTEM_PERSONALITY = `You are an accurate Discord AI assistant.
 RULES:
-1. ALWAYS reply strictly in English unless explicitly asked otherwise.
-2. Be factually accurate and truthful. If you do not know something, say so instead of guessing.
+1. ALWAYS reply strictly in English unless explicitly requested otherwise.
+2. Be 100% factually accurate. When asked about specific game items, quests, stats, or mechanics that you are not entirely sure of, state clearly "I don't have exact item data for that game" instead of making up names or details.
 3. Focus strictly on answering the USER'S LATEST MESSAGE. Use past messages ONLY for immediate context.
 4. Keep responses brief, clear, and under 400 characters.`;
 // =========================================================================
@@ -50,7 +50,7 @@ async function getGroqResponse(conversationHistory) {
                     ...conversationHistory
                 ],
                 model: modelName,
-                temperature: 0.5, // medium temperature forces grounded, non-hallucinated answers
+                temperature: 0.0, // low temperature forces grounded, non-hallucinated answers
                 max_tokens: 400
             });
 
