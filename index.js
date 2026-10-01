@@ -1,13 +1,17 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
+const { CohereClient } = require('cohere-ai');
 const http = require('http');
 
-// Keep Render free instance awake
+// Serwer HTTP utrzymujący aktywność usługi na Render
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
-// GitHub Models native inference endpoint and model name format
-const API_URL = "https://models.github.ai/inference/chat/completions";
-const MODEL_NAME = "openai/gpt-4o-mini";
+const cohere = new CohereClient({
+    token: process.env.COHERE_API_KEY,
+});
+
+// Model o wysokim limicie prędkości (100 RPM w darmowej wersji)
+const MODEL_NAME = 'command-r-plus';
 
 const SYSTEM_PERSONALITY = `You are a concise, strictly factual Discord AI assistant.
 RULES:
@@ -26,47 +30,28 @@ const client = new Client({
 client.once('clientReady', () => console.log(`Bot online as ${client.user.tag}`));
 
 async function getAIResponse(conversationHistory) {
-    const token = process.env.GITHUB_TOKEN;
-    
-    if (!token) {
-        throw new Error("Missing GITHUB_TOKEN environment variable in Render.");
+    if (!process.env.COHERE_API_KEY) {
+        throw new Error("Missing COHERE_API_KEY environment variable in Render.");
     }
 
-    const response = await fetch(API_URL, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token.trim()}`
-        },
-        body: JSON.stringify({
-            messages: [
-                { role: "system", content: SYSTEM_PERSONALITY },
-                ...conversationHistory
-            ],
-            model: MODEL_NAME,
-            temperature: 0.1,
-            max_tokens: 300
-        })
+    // Formatowanie historii do struktury chatu Cohere
+    const chatHistory = conversationHistory.slice(0, -1).map(msg => ({
+        role: msg.role === 'assistant' ? 'CHATBOT' : 'USER',
+        message: msg.content
+    }));
+
+    const lastMessage = conversationHistory[conversationHistory.length - 1]?.content || '';
+
+    const response = await cohere.chat({
+        model: MODEL_NAME,
+        preamble: SYSTEM_PERSONALITY,
+        chatHistory: chatHistory,
+        message: lastMessage,
+        temperature: 0.1,
+        maxTokens: 300,
     });
 
-    const responseText = await response.text();
-
-    if (!response.ok) {
-        throw new Error(`GitHub Models API Error (${response.status}): ${responseText}`);
-    }
-
-    let data;
-    try {
-        data = JSON.parse(responseText);
-    } catch (e) {
-        throw new Error(`Received unexpected text from API: "${responseText.trim()}"`);
-    }
-
-    if (!data.choices?.[0]?.message?.content) {
-        throw new Error("Received empty or malformed response choices from GitHub Models.");
-    }
-
-    return data.choices[0].message.content;
+    return response.text;
 }
 
 client.on('messageCreate', async (message) => {
