@@ -50,7 +50,7 @@ async function getGroqResponse(conversationHistory) {
                     ...conversationHistory
                 ],
                 model: modelName,
-                temperature: 0.2, // Low temperature forces grounded, non-hallucinated answers
+                temperature: 0.5, // medium temperature forces grounded, non-hallucinated answers
                 max_tokens: 400
             });
 
