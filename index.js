@@ -3,14 +3,13 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const { CohereClient } = require('cohere-ai');
 const http = require('http');
 
-// Keep Render free instance awake
+// Serwer HTTP utrzymujący aktywność usługi na Render
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
 const cohere = new CohereClient({
     token: process.env.COHERE_API_KEY,
 });
 
-// Updated to requested model version
 const MODEL_NAME = 'command-a-plus-05-2026';
 
 const SYSTEM_PERSONALITY = `You are a concise, strictly factual Discord AI assistant.
@@ -34,23 +33,24 @@ async function getAIResponse(conversationHistory) {
         throw new Error("Missing COHERE_API_KEY environment variable in Render.");
     }
 
-    const chatHistory = conversationHistory.slice(0, -1).map(msg => ({
-        role: msg.role === 'assistant' ? 'CHATBOT' : 'USER',
-        message: msg.content
-    }));
+    // Formatowanie historii wiadomości dla API v2
+    const messages = [
+        { role: 'system', content: SYSTEM_PERSONALITY },
+        ...conversationHistory.map(msg => ({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content
+        }))
+    ];
 
-    const lastMessage = conversationHistory[conversationHistory.length - 1]?.content || '';
-
-    const response = await cohere.chat({
+    // Wywołanie v2/chat zgodne z nowymi modelami
+    const response = await cohere.v2.chat({
         model: MODEL_NAME,
-        preamble: SYSTEM_PERSONALITY,
-        chatHistory: chatHistory,
-        message: lastMessage,
+        messages: messages,
         temperature: 0.1,
         maxTokens: 300,
     });
 
-    return response.text;
+    return response.message?.content?.[0]?.text;
 }
 
 client.on('messageCreate', async (message) => {
