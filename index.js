@@ -198,18 +198,68 @@ client.on('messageCreate', async (message) => {
             conversationHistory.push({ role, content: msg.content });
         });
 
-        let responseText = await getAIResponse(conversationHistory);
-
-        if (responseText) {
-            if (responseText.length > 1900) {
-                responseText = responseText.substring(0, 1900) + '...';
-            }
-            await message.reply(responseText);
-        }
-    } catch (err) {
-        console.error('Error running bot:', err);
-        await message.reply(`⚠️ Error: ${err.message || 'Could not generate response.'}`);
+    async function getAIResponse(conversationHistory) {
+    if (!process.env.COHERE_API_KEY) {
+        throw new Error("Missing COHERE_API_KEY environment variable in Render.");
     }
-});
 
-client.login(process.env.DISCORD_TOKEN);
+    const messages = [
+        { role: 'system', content: SYSTEM_PERSONALITY },
+        ...conversationHistory.map(msg => ({
+            role: msg.role === 'assistant' ? 'assistant' : 'user',
+            content: msg.content
+        }))
+    ];
+
+    let response = await cohere.chat({
+        model: MODEL_NAME,
+        messages: messages,
+        tools: [webSearchTool],
+        temperature: 0.0,
+    });
+
+    // Loop to support multi-step tool calls (e.g. Cohere refining its search query)
+    let turns = 0;
+    const maxTurns = 3;
+
+    while (response.finishReason === 'TOOL_CALL' && response.message?.toolCalls?.length > 0 && turns < maxTurns) {
+        turns++;
+        messages.push(response.message);
+
+        for (const toolCall of response.message.toolCalls) {
+            if (toolCall.function?.name === 'web_search') {
+                let args = {};
+                try {
+                    args = typeof toolCall.function.arguments === 'string' 
+                        ? JSON.parse(toolCall.function.arguments) 
+                        : toolCall.function.arguments;
+                } catch (e) { args = { query: '' }; }
+
+                console.log(`[Wiki Fetching Step ${turns}] Query: "${args.query}"`);
+                const searchResults = await performWebSearch(args.query);
+
+                messages.push({
+                    role: 'tool',
+                    toolCallId: toolCall.id,
+                    content: searchResults
+                });
+            }
+        }
+
+        // Execute follow-up request to Cohere
+        response = await cohere.chat({
+            model: MODEL_NAME,
+            messages: messages,
+            tools: [webSearchTool],
+            temperature: 0.0,
+        });
+    }
+
+    const textOutput = extractCohereText(response);
+
+    if (!textOutput) {
+        return "I retrieved wiki articles for that query, but I couldn't find specific database stats matching your request.";
+    }
+
+    return textOutput;
+}
