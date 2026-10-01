@@ -1,30 +1,27 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 const Groq = require('groq-sdk');
+const { search } = require('duckduckgo-search');
 const http = require('http');
 
-// Keep Render service awake
+// Keep Render service alive via UptimeRobot
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// High-quality primary self-serve production models on Groq
+// High-quality models for factual reasoning
 const PREFERRED_MODELS = [
     'openai/gpt-oss-120b',
     'openai/gpt-oss-20b',
     'llama-3.1-8b-instant'
 ];
 
-// =========================================================================
-// 🎭 EDIT PERSONALITY & RULES HERE
-// =========================================================================
-const SYSTEM_PERSONALITY = `You are an accurate Discord AI assistant.
+const SYSTEM_PERSONALITY = `You are an accurate, helpful Discord AI assistant.
 RULES:
-1. ALWAYS reply strictly in English unless explicitly requested otherwise.
-2. Be 100% factually accurate. When asked about specific game items, quests, stats, or mechanics that you are not entirely sure of, state clearly "I don't have exact item data for that game" instead of making up names or details.
-3. Focus strictly on answering the USER'S LATEST MESSAGE. Use past messages ONLY for immediate context.
-4. Keep responses brief, clear, and under 400 characters.`;
-// =========================================================================
+1. ALWAYS reply strictly in English unless explicitly asked otherwise.
+2. Use the provided SEARCH RESULTS to answer accurately. Never invent or hallucinate game mechanics, stats, items, or names.
+3. If you do not have search results or aren't 100% sure, clearly admit "I don't have exact data on that" instead of guessing.
+4. Keep responses clear, accurate, and under 800 characters.`;
 
 const client = new Client({
     intents: [
@@ -38,26 +35,44 @@ client.once('clientReady', () => {
     console.log(`Bot online as ${client.user.tag}`);
 });
 
-async function getGroqResponse(conversationHistory) {
+// Helper function to fetch web search context
+async function getSearchContext(query) {
+    try {
+        const searchResults = await search(query, { safeSearch: 'STRICT' });
+        if (searchResults && searchResults.results && searchResults.results.length > 0) {
+            const topResults = searchResults.results.slice(0, 3);
+            return topResults.map(r => `Source (${r.title}): ${r.snippet}`).join('\n\n');
+        }
+    } catch (err) {
+        console.warn('Web search failed or timed out:', err.message);
+    }
+    return '';
+}
+
+async function getGroqResponse(conversationHistory, searchContext) {
     let lastError = null;
 
-    // Cycle through top high-quality self-serve models until one succeeds
+    // Inject web search context into system instructions if available
+    const systemInstruction = searchContext
+        ? `${SYSTEM_PERSONALITY}\n\nREAL-TIME WEB SEARCH RESULTS FOR THIS QUERY:\n${searchContext}`
+        : SYSTEM_PERSONALITY;
+
     for (const modelName of PREFERRED_MODELS) {
         try {
             const completion = await groq.chat.completions.create({
                 messages: [
-                    { role: 'system', content: SYSTEM_PERSONALITY },
+                    { role: 'system', content: systemInstruction },
                     ...conversationHistory
                 ],
                 model: modelName,
-                temperature: 0.0, // low temperature forces grounded, non-hallucinated answers
-                max_tokens: 400
+                temperature: 0.1, // Near-zero temperature for strict grounding
+                max_tokens: 500
             });
 
             const text = completion.choices[0]?.message?.content;
             if (text) return text;
         } catch (err) {
-            console.warn(`[Groq] Model ${modelName} unavailable (${err.status || err.message}), trying next fallback...`);
+            console.warn(`[Groq] Model ${modelName} failed (${err.status || err.message}), trying next...`);
             lastError = err;
         }
     }
@@ -66,16 +81,16 @@ async function getGroqResponse(conversationHistory) {
 }
 
 client.on('messageCreate', async (message) => {
-    // Ignore self-messages
     if (message.author.id === client.user.id) return;
 
     try {
         await message.channel.sendTyping();
 
-        // Fetch only the last 3 messages to prevent topic bleeding
+        // 1. Fetch search context for the user's latest prompt
+        const searchContext = await getSearchContext(message.content);
+
+        // 2. Fetch last 3 messages for conversational memory
         const pastMessages = await message.channel.messages.fetch({ limit: 3 });
-        
-        // Format chronological context
         const conversationHistory = [];
         pastMessages.reverse().forEach(msg => {
             if (!msg.content) return;
@@ -83,8 +98,8 @@ client.on('messageCreate', async (message) => {
             conversationHistory.push({ role, content: msg.content });
         });
 
-        // Generate response
-        let responseText = await getGroqResponse(conversationHistory);
+        // 3. Generate grounded response
+        let responseText = await getGroqResponse(conversationHistory, searchContext);
 
         if (responseText) {
             if (responseText.length > 1900) {
