@@ -3,17 +3,17 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const OpenAI = require('openai');
 const http = require('http');
 
-// Keep Render free instance awake via UptimeRobot
+// Keep Render free instance awake
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
-// Initialize OpenAI client pointed to GitHub Models endpoint
+// Initialize OpenAI client pointed to GitHub Models inference endpoint
 const clientAI = new OpenAI({
-    baseURL: "https://models.github.ai/inference",
+    baseURL: "https://models.inference.ai.azure.com",
     apiKey: process.env.GITHUB_TOKEN || process.env.GROQ_API_KEY
 });
 
-// Full model identifier required by GitHub Models API
-const MODEL_NAME = "openai/gpt-4o-mini";
+// Model identifier for GitHub Models / Azure Inference
+const MODEL_NAME = "gpt-4o-mini";
 
 const SYSTEM_PERSONALITY = `You are a concise, accurate Discord AI assistant.
 RULES:
@@ -40,25 +40,25 @@ async function getAIResponse(conversationHistory) {
             ...conversationHistory
         ],
         model: MODEL_NAME,
-        temperature: 0.1, // Near-zero temperature forces strict factual accuracy
+        temperature: 0.1,
         max_tokens: 300
     });
 
-    if (!completion.choices || completion.choices.length === 0) {
-        throw new Error("Received empty response choices from GitHub Models.");
+    if (!completion || !completion.choices || completion.choices.length === 0) {
+        console.error("Full GitHub API response payload:", JSON.stringify(completion, null, 2));
+        throw new Error("GitHub Models returned an empty completion choice. Check GITHUB_TOKEN permissions.");
     }
 
     return completion.choices[0]?.message?.content;
 }
 
 client.on('messageCreate', async (message) => {
-    // Prevent infinite loops by ignoring bot self-messages
     if (message.author.id === client.user.id) return;
 
     try {
         await message.channel.sendTyping();
 
-        // 1. Fetch rolling 3-message buffer for immediate context
+        // 1. Fetch rolling 3-message buffer for context
         const pastMessages = await message.channel.messages.fetch({ limit: 3 });
         const conversationHistory = [];
         pastMessages.reverse().forEach(msg => {
@@ -67,7 +67,7 @@ client.on('messageCreate', async (message) => {
             conversationHistory.push({ role, content: msg.content });
         });
 
-        // 2. Generate response via GitHub Models GPT-4o-mini
+        // 2. Generate response via GitHub Models
         let responseText = await getAIResponse(conversationHistory);
 
         if (responseText) {
