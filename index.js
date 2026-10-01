@@ -3,13 +3,17 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const Groq = require('groq-sdk');
 const http = require('http');
 
-// Keep Render service alive via UptimeRobot
+// Keep Render service awake
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// Lock strictly to the high-accuracy 70B model to eliminate 8B hallucinations
-const HIGH_QUALITY_MODEL = 'llama-3.3-70b-versatile';
+// High-quality primary self-serve production models on Groq
+const PREFERRED_MODELS = [
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b',
+    'llama-3.1-8b-instant'
+];
 
 // =========================================================================
 // 🎭 EDIT PERSONALITY & RULES HERE
@@ -35,31 +39,43 @@ client.once('clientReady', () => {
 });
 
 async function getGroqResponse(conversationHistory) {
-    // Directly invoke the 70B model with low temperature for factual precision
-    const completion = await groq.chat.completions.create({
-        messages: [
-            { role: 'system', content: SYSTEM_PERSONALITY },
-            ...conversationHistory
-        ],
-        model: HIGH_QUALITY_MODEL,
-        temperature: 0.2, // Very low temperature forces strictly grounded, non-creative answers
-        max_tokens: 400
-    });
+    let lastError = null;
 
-    return completion.choices[0]?.message?.content;
+    // Cycle through top high-quality self-serve models until one succeeds
+    for (const modelName of PREFERRED_MODELS) {
+        try {
+            const completion = await groq.chat.completions.create({
+                messages: [
+                    { role: 'system', content: SYSTEM_PERSONALITY },
+                    ...conversationHistory
+                ],
+                model: modelName,
+                temperature: 0.2, // Low temperature forces grounded, non-hallucinated answers
+                max_tokens: 400
+            });
+
+            const text = completion.choices[0]?.message?.content;
+            if (text) return text;
+        } catch (err) {
+            console.warn(`[Groq] Model ${modelName} unavailable (${err.status || err.message}), trying next fallback...`);
+            lastError = err;
+        }
+    }
+
+    throw lastError || new Error('All configured Groq models failed.');
 }
 
 client.on('messageCreate', async (message) => {
-    // Ignore self-messages to prevent loops
+    // Ignore self-messages
     if (message.author.id === client.user.id) return;
 
     try {
         await message.channel.sendTyping();
 
-        // Fetch only the last 3 messages to avoid mixing up old chat context
+        // Fetch only the last 3 messages to prevent topic bleeding
         const pastMessages = await message.channel.messages.fetch({ limit: 3 });
         
-        // Format chronological conversation history
+        // Format chronological context
         const conversationHistory = [];
         pastMessages.reverse().forEach(msg => {
             if (!msg.content) return;
@@ -67,7 +83,7 @@ client.on('messageCreate', async (message) => {
             conversationHistory.push({ role, content: msg.content });
         });
 
-        // Generate response using strictly 70B
+        // Generate response
         let responseText = await getGroqResponse(conversationHistory);
 
         if (responseText) {
@@ -78,12 +94,7 @@ client.on('messageCreate', async (message) => {
         }
     } catch (err) {
         console.error('Error running bot:', err);
-        
-        if (err.status === 429) {
-            await message.reply('⚠️ Rate limit reached on 70B model. Please wait a few seconds.');
-        } else {
-            await message.reply(`⚠️ Error: ${err.message || 'Could not generate response.'}`);
-        }
+        await message.reply(`⚠️ Error: ${err.message || 'Could not generate response.'}`);
     }
 });
 
