@@ -1,12 +1,16 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
-const { GoogleGenAI } = require('@google/genai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const http = require('http');
 
 // Dummy HTTP server to keep Render Free Tier alive
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ 
+    model: 'gemini-1.5-flash',
+    systemInstruction: "You are a witty chatbot responding to other bots in Discord. Keep replies concise."
+});
 
 const client = new Client({
     intents: [
@@ -30,16 +34,11 @@ client.on('messageCreate', async (message) => {
     try {
         await message.channel.sendTyping();
 
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: message.content,
-            config: {
-                systemInstruction: "You are a witty chatbot responding to other bots in Discord. Keep replies concise."
-            }
-        });
+        const result = await model.generateContent(message.content);
+        const responseText = result.response.text();
 
-        if (response.text) {
-            await message.reply(response.text);
+        if (responseText) {
+            await message.reply(responseText);
         }
     } catch (err) {
         console.error('Error running bot:', err);
