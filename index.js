@@ -1,24 +1,17 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
-const OpenAI = require('openai');
 const http = require('http');
 
 // Keep Render free instance awake
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
-// Initialize OpenAI client pointed to GitHub Models inference endpoint
-const clientAI = new OpenAI({
-    baseURL: "https://models.inference.ai.azure.com",
-    apiKey: process.env.GITHUB_TOKEN || process.env.GROQ_API_KEY
-});
-
-// Model identifier for GitHub Models / Azure Inference
+const GITHUB_ENDPOINT = "https://models.github.ai/inference/chat/completions";
 const MODEL_NAME = "gpt-4o-mini";
 
-const SYSTEM_PERSONALITY = `You are a concise, accurate Discord AI assistant.
+const SYSTEM_PERSONALITY = `You are a concise, strictly factual Discord AI assistant.
 RULES:
-1. ALWAYS respond strictly in English unless requested otherwise.
-2. Be 100% factually accurate. When asked about specific game items, mechanics, or builds that you do not have verified database knowledge for, clearly state: "I don't have exact database stats for that game's build system." NEVER invent fake RPG item names or stats.
+1. ALWAYS respond strictly in English.
+2. Be 100% factually accurate. When asked about game mechanics, stats, or builds that you do not have verified data for (such as Deepwoken), state clearly: "I don't have exact database stats for that game's build system." NEVER invent fake RPG item names or stats.
 3. Keep responses brief, clear, and under 500 characters.`;
 
 const client = new Client({
@@ -29,27 +22,39 @@ const client = new Client({
     ]
 });
 
-client.once('clientReady', () => {
-    console.log(`Bot online as ${client.user.tag}`);
-});
+client.once('clientReady', () => console.log(`Bot online as ${client.user.tag}`));
 
 async function getAIResponse(conversationHistory) {
-    const completion = await clientAI.chat.completions.create({
-        messages: [
-            { role: 'system', content: SYSTEM_PERSONALITY },
-            ...conversationHistory
-        ],
-        model: MODEL_NAME,
-        temperature: 0.1,
-        max_tokens: 300
-    });
-
-    if (!completion || !completion.choices || completion.choices.length === 0) {
-        console.error("Full GitHub API response payload:", JSON.stringify(completion, null, 2));
-        throw new Error("GitHub Models returned an empty completion choice. Check GITHUB_TOKEN permissions.");
+    const token = process.env.GITHUB_TOKEN;
+    
+    if (!token) {
+        throw new Error("Missing GITHUB_TOKEN in Render environment variables.");
     }
 
-    return completion.choices[0]?.message?.content;
+    const response = await fetch(GITHUB_ENDPOINT, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token.trim()}`
+        },
+        body: JSON.stringify({
+            messages: [
+                { role: "system", content: SYSTEM_PERSONALITY },
+                ...conversationHistory
+            ],
+            model: MODEL_NAME,
+            temperature: 0.1,
+            max_tokens: 300
+        })
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`GitHub Models API Error (${response.status}): ${errorText}`);
+    }
+
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content;
 }
 
 client.on('messageCreate', async (message) => {
@@ -58,7 +63,6 @@ client.on('messageCreate', async (message) => {
     try {
         await message.channel.sendTyping();
 
-        // 1. Fetch rolling 3-message buffer for context
         const pastMessages = await message.channel.messages.fetch({ limit: 3 });
         const conversationHistory = [];
         pastMessages.reverse().forEach(msg => {
@@ -67,7 +71,6 @@ client.on('messageCreate', async (message) => {
             conversationHistory.push({ role, content: msg.content });
         });
 
-        // 2. Generate response via GitHub Models
         let responseText = await getAIResponse(conversationHistory);
 
         if (responseText) {
