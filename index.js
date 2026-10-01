@@ -3,7 +3,7 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const { CohereClientV2 } = require('cohere-ai');
 const http = require('http');
 
-// Keep Render free instance awake
+// Keep Render web service awake
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
 const cohere = new CohereClientV2({
@@ -12,24 +12,24 @@ const cohere = new CohereClientV2({
 
 const MODEL_NAME = 'command-a-plus-05-2026';
 
-const SYSTEM_PERSONALITY = `You are a helpful Discord AI assistant with access to real-time web search.
+const SYSTEM_PERSONALITY = `You are a concise, strictly factual Discord AI assistant with real-time web search capabilities.
 RULES:
 1. ALWAYS respond strictly in English.
-2. If asked about current events, live information, or specific game stats/builds you do not know natively, use the web_search tool to verify facts.
-3. Keep responses concise and under 1000 characters.`;
+2. If asked about current events, live stats, or specific game mechanics (such as Deepwoken) that require exact data, use the web_search tool.
+3. Keep responses clear, accurate, and under 1000 characters.`;
 
-// Define the Web Search tool schema for Cohere v2
+// Define the Web Search tool schema for Cohere
 const webSearchTool = {
     type: "function",
     function: {
         name: "web_search",
-        description: "Search the web for up-to-date information, news, game stats, or facts.",
+        description: "Search the internet for live information, game stats, news, or factual data.",
         parameters: {
             type: "object",
             properties: {
                 query: {
                     type: "string",
-                    description: "The search engine query."
+                    description: "The search query string."
                 }
             },
             required: ["query"]
@@ -37,26 +37,32 @@ const webSearchTool = {
     }
 };
 
-// Simple web fetcher helper (uses DuckDuckGo HTML scraping or standard search endpoint)
+// Zero-dependency web fetcher using native Node fetch
 async function performWebSearch(query) {
     try {
-        const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
-        const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+        const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
         });
-        const html = await res.text();
-        
-        // Extract basic snippets from results
+
+        if (!response.ok) return "Search engine returned an error status.";
+
+        const html = await response.text();
         const snippets = [];
-        const regex = /<a class="result__snippet[^>]*>(.*?)<\/a>/g;
-        let match;
-        while ((match = regex.exec(html)) !== null && snippets.length < 3) {
-            snippets.push(match[1].replace(/<[^>]+>/g, '').trim());
-        }
         
-        return snippets.length > 0 ? snippets.join('\n') : "No relevant search results found.";
+        // Extract plain text snippets from HTML body
+        const regex = /<a class="result__snippet[^>]*>(.*?)<\/a>/gi;
+        let match;
+        while ((match = regex.exec(html)) !== null && snippets.length < 4) {
+            const cleanText = match[1].replace(/<[^>]+>/g, '').trim();
+            if (cleanText) snippets.push(cleanText);
+        }
+
+        return snippets.length > 0 ? snippets.join('\n') : "No search results returned for this query.";
     } catch (err) {
-        return "Search failed due to network error.";
+        console.error("Web search error:", err);
+        return "Search failed due to network connection issues.";
     }
 }
 
@@ -83,7 +89,7 @@ async function getAIResponse(conversationHistory) {
         }))
     ];
 
-    // Step 1: Call Cohere with tools enabled
+    // Step 1: Send request to Cohere with tool support
     let response = await cohere.chat({
         model: MODEL_NAME,
         messages: messages,
@@ -91,19 +97,24 @@ async function getAIResponse(conversationHistory) {
         temperature: 0.1,
     });
 
-    // Step 2: Handle Tool Calls if Cohere requests a web search
+    // Step 2: Check if Cohere requested a search tool call
     if (response.message?.toolCalls && response.message.toolCalls.length > 0) {
-        // Append Cohere's assistant message with tool calls to history
         messages.push(response.message);
 
         for (const toolCall of response.message.toolCalls) {
             if (toolCall.function?.name === 'web_search') {
-                const args = JSON.parse(toolCall.function.arguments || '{}');
-                console.log(`[Tool Call] Searching web for: "${args.query}"`);
-                
+                let args = {};
+                try {
+                    args = typeof toolCall.function.arguments === 'string' 
+                        ? JSON.parse(toolCall.function.arguments) 
+                        : toolCall.function.arguments;
+                } catch (e) {
+                    args = { query: '' };
+                }
+
+                console.log(`[Search Executing] Query: "${args.query}"`);
                 const searchResults = await performWebSearch(args.query);
 
-                // Pass search results back to Cohere
                 messages.push({
                     role: 'tool',
                     toolCallId: toolCall.id,
@@ -112,7 +123,7 @@ async function getAIResponse(conversationHistory) {
             }
         }
 
-        // Step 3: Call Cohere again with search results included to generate final text
+        // Step 3: Trigger final completion with search results attached
         response = await cohere.chat({
             model: MODEL_NAME,
             messages: messages,
@@ -121,7 +132,7 @@ async function getAIResponse(conversationHistory) {
         });
     }
 
-    // Parse final text response
+    // Step 4: Extract response text across blocks
     let textOutput = '';
     if (response.message?.content && Array.isArray(response.message.content)) {
         for (const block of response.message.content) {
