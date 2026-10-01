@@ -41,36 +41,65 @@ const webSearchTool = {
 };
 
 // Zero-dependency web fetcher using native Node fetch
-async function performWebSearch(query) {
+// Universal MediaWiki Fetcher (Works for Wikipedia, Fandom, Deadlock Wiki, Deepwoken Wiki)
+async function fetchWikiSnippet(baseUrl, query) {
     try {
-        // Force the search query to target the Deepwoken Wiki if relevant
-        const targetedQuery = query.toLowerCase().includes('deepwoken') 
-            ? query 
-            : `${query} site:deepwoken.fandom.com`;
-
-        const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(targetedQuery)}`, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
+        const searchEndpoint = `${baseUrl}/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*`;
+        const res = await fetch(searchEndpoint, {
+            headers: { 'User-Agent': 'DiscordAIBot/1.0 (contact@example.com)' }
         });
 
-        if (!response.ok) return "Search engine returned an error status.";
+        if (!res.ok) return null;
+        const data = await res.json();
+        const results = data.query?.search;
 
-        const html = await response.text();
-        const snippets = [];
-        
-        const regex = /<a class="result__snippet[^>]*>(.*?)<\/a>/gi;
-        let match;
-        while ((match = regex.exec(html)) !== null && snippets.length < 5) {
-            const cleanText = match[1].replace(/<[^>]+>/g, '').trim();
-            if (cleanText) snippets.push(cleanText);
-        }
+        if (!results || results.length === 0) return null;
 
-        return snippets.length > 0 ? snippets.join('\n\n') : "No search results returned for this query.";
+        // Clean out HTML tags returned by MediaWiki search snippets
+        const snippets = results.slice(0, 3).map(item => {
+            const cleanSnippet = item.snippet.replace(/<[^>]+>/g, '').trim();
+            return `[${item.title}]: ${cleanSnippet}`;
+        });
+
+        return snippets.join('\n\n');
     } catch (err) {
-        console.error("Web search error:", err);
-        return "Search failed due to network connection issues.";
+        return null;
     }
+}
+
+async function performWebSearch(query) {
+    const q = query.toLowerCase();
+
+    // 1. Deadlock-specific queries -> Deadlock Fandom & Deadlock.wiki
+    if (q.includes('deadlock')) {
+        const deadlockFandom = await fetchWikiSnippet('https://playdeadlock.fandom.com', query);
+        if (deadlockFandom) return `--- Deadlock Wiki Results ---\n${deadlockFandom}`;
+
+        const deadlockedWiki = await fetchWikiSnippet('https://deadlocked.wiki', query);
+        if (deadlockedWiki) return `--- Deadlocked Wiki Results ---\n${deadlockedWiki}`;
+    }
+
+    // 2. Deepwoken-specific queries -> Deepwoken Fandom Wiki
+    if (q.includes('deepwoken')) {
+        const deepwokenFandom = await fetchWikiSnippet('https://deepwoken.fandom.com', query);
+        if (deepwokenFandom) return `--- Deepwoken Wiki Results ---\n${deepwokenFandom}`;
+    }
+
+    // 3. Fallback / General Game Wiki -> Search across generic Fandom domains
+    if (q.includes('build') || q.includes('stats') || q.includes('manga') || q.includes('anime')) {
+        // Extract main topic word to attempt matching a fandom subdomain (e.g. "valorant")
+        const words = query.split(' ').filter(w => w.length > 3);
+        for (const word of words) {
+            const genericFandom = await fetchWikiSnippet(`https://${word.toLowerCase()}.fandom.com`, query);
+            if (genericFandom) return `--- ${word} Fandom Results ---\n${genericFandom}`;
+        }
+    }
+
+    // 4. General Knowledge -> Wikipedia
+    const wikipedia = await fetchWikiSnippet('https://en.wikipedia.org', query);
+    if (wikipedia) return `--- Wikipedia Results ---\n${wikipedia}`;
+
+    return "No relevant information found on Wikipedia or supported game wikis.";
 }
 
 const client = new Client({
