@@ -3,11 +3,17 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const Groq = require('groq-sdk');
 const http = require('http');
 
-// Simple HTTP endpoint to keep Render awake via UptimeRobot
+// Keep Render free service awake
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
-// Initialize Groq SDK
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+// List of active models in order of attempt
+const GROQ_MODELS = [
+    'llama-3.1-8b-instant',
+    'llama-3.3-70b-versatile',
+    'mixtral-8x7b-32768'
+];
 
 const client = new Client({
     intents: [
@@ -21,34 +27,48 @@ client.once('clientReady', () => {
     console.log(`Bot online as ${client.user.tag}`);
 });
 
+async function getGroqResponse(userPrompt) {
+    let lastError = null;
+
+    for (const modelName of GROQ_MODELS) {
+        try {
+            const completion = await groq.chat.completions.create({
+                messages: [
+                    {
+                        role: 'system',
+                        content: 'You are a witty, helpful Discord AI assistant. Keep responses under 500 characters.'
+                    },
+                    {
+                        role: 'user',
+                        content: userPrompt
+                    }
+                ],
+                model: modelName,
+                temperature: 0.7,
+                max_tokens: 500
+            });
+
+            const text = completion.choices[0]?.message?.content;
+            if (text) return text;
+        } catch (err) {
+            console.warn(`[Groq] Model ${modelName} failed (${err.status || err.message}), trying fallback...`);
+            lastError = err;
+        }
+    }
+
+    throw lastError || new Error('All Groq models failed.');
+}
+
 client.on('messageCreate', async (message) => {
-    // Prevent infinite loops by ignoring the bot's own messages
+    // Ignore self-messages to prevent loops
     if (message.author.id === client.user.id) return;
 
     try {
         await message.channel.sendTyping();
 
-        // Request chat completion from Groq (Llama 3.3 70B)
-        const completion = await groq.chat.completions.create({
-            messages: [
-                {
-                    role: 'system',
-                    content: 'You are a witty, helpful Discord AI assistant. Keep responses engaging and under 500 characters.'
-                },
-                {
-                    role: 'user',
-                    content: message.content
-                }
-            ],
-            model: 'llama-3.3-70b-versatile',
-            temperature: 0.7,
-            max_tokens: 500
-        });
-
-        let responseText = completion.choices[0]?.message?.content;
+        let responseText = await getGroqResponse(message.content);
 
         if (responseText) {
-            // Trim if response exceeds Discord's 2000 character limit
             if (responseText.length > 1900) {
                 responseText = responseText.substring(0, 1900) + '...';
             }
@@ -56,12 +76,7 @@ client.on('messageCreate', async (message) => {
         }
     } catch (err) {
         console.error('Error running bot:', err);
-        
-        if (err.status === 429) {
-            await message.reply('⚠️ Rate limit reached. Please wait a few seconds before asking again.');
-        } else {
-            await message.reply(`⚠️ Error: ${err.message || 'Could not generate response.'}`);
-        }
+        await message.reply(`⚠️ ${err.message || 'Error generating response.'}`);
     }
 });
 
