@@ -6,10 +6,9 @@ const http = require('http');
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ 
-    model: 'gemini-1.5-flash',
-    systemInstruction: "You are a witty, friendly Discord AI assistant. You respond to both human users and other bots. Keep responses concise and under 500 characters."
-});
+
+// Fallback model list to guarantee an active endpoint works
+const MODEL_NAMES = ['gemini-1.5-flash-latest', 'gemini-pro', 'gemini-1.5-pro-latest'];
 
 const client = new Client({
     intents: [
@@ -24,20 +23,36 @@ client.once('clientReady', () => {
 });
 
 client.on('messageCreate', async (message) => {
-    // Zapobiegaj zapętlaniu: ignoruj TYLKO wiadomości od samego siebie
+    // Ignore messages from this bot itself to prevent infinite loops
     if (message.author.id === client.user.id) return;
 
     try {
         await message.channel.sendTyping();
 
-        const result = await model.generateContent(message.content);
-        let responseText = result.response.text();
+        let responseText = null;
+        let lastError = null;
+
+        // Try available models until one succeeds
+        for (const modelName of MODEL_NAMES) {
+            try {
+                const model = genAI.getGenerativeModel({ model: modelName });
+                const result = await model.generateContent(message.content);
+                responseText = result.response.text();
+                if (responseText) break;
+            } catch (err) {
+                lastError = err;
+                console.warn(`Model ${modelName} failed, trying next...`);
+            }
+        }
 
         if (responseText) {
             if (responseText.length > 1900) {
                 responseText = responseText.substring(0, 1900) + '...';
             }
             await message.reply(responseText);
+        } else {
+            console.error('All models failed:', lastError);
+            await message.reply(`⚠️ Gemini Error: ${lastError?.message || 'Could not fetch response.'}`);
         }
     } catch (err) {
         console.error('Error running bot:', err);
