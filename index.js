@@ -3,15 +3,15 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const { CohereClient } = require('cohere-ai');
 const http = require('http');
 
-// Serwer HTTP utrzymujący aktywność usługi na Render
+// Keep Render free instance awake
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
 const cohere = new CohereClient({
     token: process.env.COHERE_API_KEY,
 });
 
-// Model o wysokim limicie prędkości (100 RPM w darmowej wersji)
-const MODEL_NAME = 'command-r-plus';
+// Active, supported model identifier
+const MODEL_NAME = 'command-r-plus-08-2024';
 
 const SYSTEM_PERSONALITY = `You are a concise, strictly factual Discord AI assistant.
 RULES:
@@ -34,7 +34,6 @@ async function getAIResponse(conversationHistory) {
         throw new Error("Missing COHERE_API_KEY environment variable in Render.");
     }
 
-    // Formatowanie historii do struktury chatu Cohere
     const chatHistory = conversationHistory.slice(0, -1).map(msg => ({
         role: msg.role === 'assistant' ? 'CHATBOT' : 'USER',
         message: msg.content
