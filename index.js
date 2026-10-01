@@ -12,11 +12,14 @@ const cohere = new CohereClientV2({
 
 const MODEL_NAME = 'command-a-plus-05-2026';
 
-const SYSTEM_PERSONALITY = `You are a concise, strictly factual Discord AI assistant with real-time web search capabilities.
-RULES:
+
+const SYSTEM_PERSONALITY = `You are a strictly factual, highly precise Discord AI assistant for game queries and general information.
+
+STRICT GROUNDING RULES:
 1. ALWAYS respond strictly in English.
-2. If asked about current events, live stats, or specific game mechanics (such as Deepwoken) that require exact data, use the web_search tool.
-3. Keep responses clear, accurate, and under 1000 characters.`;
+2. ALWAYS use the web_search tool when asked about specific game mechanics, weapon stats, talents, mantras, or item locations.
+3. If the search results DO NOT contain the exact numbers, stats, or facts requested, state clearly: "I couldn't find verified database stats for that in the current search results." NEVER guess or invent RPG item names, talent requirements, scaling, or damage values.
+4. Keep responses direct, clear, and under 1000 characters.`;
 
 // Define the Web Search tool schema for Cohere
 const webSearchTool = {
@@ -40,7 +43,12 @@ const webSearchTool = {
 // Zero-dependency web fetcher using native Node fetch
 async function performWebSearch(query) {
     try {
-        const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+        // Force the search query to target the Deepwoken Wiki if relevant
+        const targetedQuery = query.toLowerCase().includes('deepwoken') 
+            ? query 
+            : `${query} site:deepwoken.fandom.com`;
+
+        const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(targetedQuery)}`, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
@@ -51,15 +59,14 @@ async function performWebSearch(query) {
         const html = await response.text();
         const snippets = [];
         
-        // Extract plain text snippets from HTML body
         const regex = /<a class="result__snippet[^>]*>(.*?)<\/a>/gi;
         let match;
-        while ((match = regex.exec(html)) !== null && snippets.length < 4) {
+        while ((match = regex.exec(html)) !== null && snippets.length < 5) {
             const cleanText = match[1].replace(/<[^>]+>/g, '').trim();
             if (cleanText) snippets.push(cleanText);
         }
 
-        return snippets.length > 0 ? snippets.join('\n') : "No search results returned for this query.";
+        return snippets.length > 0 ? snippets.join('\n\n') : "No search results returned for this query.";
     } catch (err) {
         console.error("Web search error:", err);
         return "Search failed due to network connection issues.";
