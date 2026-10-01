@@ -5,7 +5,8 @@ const http = require('http');
 // Keep Render free instance awake
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
-const GITHUB_ENDPOINT = "https://models.github.ai/inference/chat/completions";
+// Azure Inference API endpoint for GitHub Models
+const API_URL = "https://models.inference.ai.azure.com/chat/completions";
 const MODEL_NAME = "gpt-4o-mini";
 
 const SYSTEM_PERSONALITY = `You are a concise, strictly factual Discord AI assistant.
@@ -28,10 +29,10 @@ async function getAIResponse(conversationHistory) {
     const token = process.env.GITHUB_TOKEN;
     
     if (!token) {
-        throw new Error("Missing GITHUB_TOKEN in Render environment variables.");
+        throw new Error("Missing GITHUB_TOKEN environment variable in Render.");
     }
 
-    const response = await fetch(GITHUB_ENDPOINT, {
+    const response = await fetch(API_URL, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -48,13 +49,25 @@ async function getAIResponse(conversationHistory) {
         })
     });
 
+    const responseText = await response.text();
+
     if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`GitHub Models API Error (${response.status}): ${errorText}`);
+        throw new Error(`GitHub API Error (${response.status}): ${responseText}`);
     }
 
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content;
+    // Guard against plain text "OK" responses
+    let data;
+    try {
+        data = JSON.parse(responseText);
+    } catch (e) {
+        throw new Error(`GitHub returned non-JSON response: "${responseText.trim()}"`);
+    }
+
+    if (!data.choices?.[0]?.message?.content) {
+        throw new Error("Received empty or malformed completion payload from API.");
+    }
+
+    return data.choices[0].message.content;
 }
 
 client.on('messageCreate', async (message) => {
