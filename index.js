@@ -3,7 +3,6 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const { GoogleGenAI } = require('@google/genai');
 const http = require('http');
 
-// Simple HTTP endpoint to keep Render awake via UptimeRobot
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -21,14 +20,13 @@ client.once('clientReady', () => {
 });
 
 client.on('messageCreate', async (message) => {
-    // Prevent infinite loops by ignoring the bot's own messages
     if (message.author.id === client.user.id) return;
 
     try {
         await message.channel.sendTyping();
 
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3.8-flash',
             contents: message.content,
             config: {
                 systemInstruction: "You are a witty, concise Discord AI assistant. Keep responses under 500 characters."
@@ -45,7 +43,6 @@ client.on('messageCreate', async (message) => {
         }
     } catch (err) {
         console.error('Error running bot:', err);
-        await message.reply(`⚠️ Error generating response: ${err.message}`);
     }
 });
 
