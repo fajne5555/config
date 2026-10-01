@@ -3,16 +3,15 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const Groq = require('groq-sdk');
 const http = require('http');
 
-// Keep Render free service awake
+// Keep Render free service awake via UptimeRobot
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// List of active models in order of attempt
+// Active Groq production models
 const GROQ_MODELS = [
-    'llama-3.1-8b-instant',
     'llama-3.3-70b-versatile',
-    'mixtral-8x7b-32768'
+    'llama-3.1-8b-instant'
 ];
 
 const client = new Client({
@@ -51,7 +50,7 @@ async function getGroqResponse(userPrompt) {
             const text = completion.choices[0]?.message?.content;
             if (text) return text;
         } catch (err) {
-            console.warn(`[Groq] Model ${modelName} failed (${err.status || err.message}), trying fallback...`);
+            console.warn(`[Groq] Model ${modelName} failed (${err.status || err.message}), trying next...`);
             lastError = err;
         }
     }
@@ -60,7 +59,7 @@ async function getGroqResponse(userPrompt) {
 }
 
 client.on('messageCreate', async (message) => {
-    // Ignore self-messages to prevent loops
+    // Ignore self-messages to prevent infinite loops
     if (message.author.id === client.user.id) return;
 
     try {
