@@ -10,8 +10,8 @@ const cohere = new CohereClient({
     token: process.env.COHERE_API_KEY,
 });
 
-// Active, supported model identifier
-const MODEL_NAME = 'command-r-plus-08-2024';
+// Updated to requested model version
+const MODEL_NAME = 'command-a-plus-05-2026';
 
 const SYSTEM_PERSONALITY = `You are a concise, strictly factual Discord AI assistant.
 RULES:
