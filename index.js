@@ -3,7 +3,6 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const { CohereClientV2 } = require('cohere-ai');
 const http = require('http');
 
-// Keep Render web service awake
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
 const cohere = new CohereClientV2({
@@ -12,18 +11,19 @@ const cohere = new CohereClientV2({
 
 const MODEL_NAME = 'command-a-plus-05-2026';
 
-const SYSTEM_PERSONALITY = `You are a strictly factual assistant for game mechanics, builds, and items.
+const SYSTEM_PERSONALITY = `You are a strictly factual assistant for game mechanics, builds, and items (Deepwoken, Deadlock).
 
 RULES:
 1. ALWAYS respond strictly in English.
-2. NEVER invent fake builds, item names, talent stats, or mechanics.
-3. ALWAYS use the web_search tool when asked about items, game builds, stats, or mechanics.`;
+2. NEVER invent fake builds, item names, or talent stats (e.g. Do NOT create fake classes like "Stalwart Defender").
+3. When asked for builds, search for specific mechanics, weapons, attunements, or items associated with that game and combine the facts into a structured answer.
+4. If search results do not explicitly contain requested stats, state clearly: "I couldn't find specific database details for that in the game wiki."`;
 
 const webSearchTool = {
     type: "function",
     function: {
         name: "web_search",
-        description: "Fetch full wiki article content for games and general queries.",
+        description: "Search game wikis for mechanics, builds, items, and stats.",
         parameters: {
             type: "object",
             properties: {
@@ -34,33 +34,48 @@ const webSearchTool = {
     }
 };
 
-// Fetches exact parsed text of top matching wiki page with clean truncation
+// Advanced MediaWiki Fetcher: Tries exact article parse first, falls back to full-text search snippets
 async function fetchWikiPageContent(domain, query) {
     try {
+        // Step 1: Search for page titles
         const searchUrl = `https://${domain}/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*`;
         const res1 = await fetch(searchUrl, { headers: { 'User-Agent': 'DiscordBot/1.0' } });
         if (!res1.ok) return null;
         
         const data1 = await res1.json();
-        const topResult = data1.query?.search?.[0];
-        if (!topResult) return null;
+        const searchResults = data1.query?.search;
+        if (!searchResults || searchResults.length === 0) return null;
 
+        const topResult = searchResults[0];
+
+        // Step 2: Try to get exact page parse
         const parseUrl = `https://${domain}/api.php?action=parse&page=${encodeURIComponent(topResult.title)}&prop=text&format=json&origin=*`;
         const res2 = await fetch(parseUrl, { headers: { 'User-Agent': 'DiscordBot/1.0' } });
-        if (!res2.ok) return null;
+        
+        if (res2.ok) {
+            const data2 = await res2.json();
+            const rawHtml = data2.parse?.text?.['*'];
+            if (rawHtml) {
+                const cleanText = rawHtml
+                    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+                    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+                    .replace(/<[^>]+>/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
 
-        const data2 = await res2.json();
-        const rawHtml = data2.parse?.text?.['*'];
-        if (!rawHtml) return null;
+                if (cleanText.length > 100) {
+                    return `[Source: ${domain} - Page: ${topResult.title}]\n${cleanText.substring(0, 1200)}`;
+                }
+            }
+        }
 
-        const cleanText = rawHtml
-            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-            .replace(/<[^>]+>/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
+        // Step 3: Fallback - combine snippets across top 3 search results if full page parse fails
+        const snippets = searchResults.slice(0, 3).map(r => {
+            const cleanSnippet = r.snippet.replace(/<[^>]+>/g, '').trim();
+            return `Result (${r.title}): ${cleanSnippet}`;
+        });
 
-        return `[Source: ${domain} - Page: ${topResult.title}]\n${cleanText.substring(0, 1200)}`;
+        return `[Source: ${domain} Snippets]\n${snippets.join('\n\n')}`;
     } catch (e) {
         return null;
     }
@@ -85,10 +100,9 @@ async function performWebSearch(query) {
     const wikiContent = await fetchWikiPageContent('en.wikipedia.org', query);
     if (wikiContent) return wikiContent;
 
-    return "No relevant full article content was found on the target wikis.";
+    return "No relevant article content was found on the target wikis.";
 }
 
-// Safely extracts text from any block in Cohere v2 response structure
 function extractCohereText(response) {
     let output = '';
     
@@ -139,7 +153,6 @@ async function getAIResponse(conversationHistory) {
         temperature: 0.0,
     });
 
-    // Handle multi-step tool calls (e.g. Cohere refining its search query)
     let turns = 0;
     const maxTurns = 3;
 
@@ -167,7 +180,6 @@ async function getAIResponse(conversationHistory) {
             }
         }
 
-        // Trigger follow-up Cohere completion after feeding back search result
         response = await cohere.chat({
             model: MODEL_NAME,
             messages: messages,
@@ -179,7 +191,7 @@ async function getAIResponse(conversationHistory) {
     const textOutput = extractCohereText(response);
 
     if (!textOutput) {
-        return "I retrieved wiki articles for that query, but I couldn't find specific database stats matching your request.";
+        return "I retrieved wiki articles for that query, but I couldn't find specific database details matching your request.";
     }
 
     return textOutput;
