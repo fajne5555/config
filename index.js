@@ -3,16 +3,16 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const OpenAI = require('openai');
 const http = require('http');
 
-// Keep Render free instance awake
+// Keep Render free instance awake via UptimeRobot
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
-// Initialize OpenAI client pointed to GitHub Models inference endpoint
+// Correct GitHub Models API endpoint
 const clientAI = new OpenAI({
-    baseURL: "https://models.inference.ai.azure.com",
+    baseURL: "https://models.github.ai/inference",
     apiKey: process.env.GITHUB_TOKEN || process.env.GROQ_API_KEY
 });
 
-// Primary model for fast, accurate responses
+// Primary model on GitHub Models
 const MODEL_NAME = "gpt-4o-mini";
 
 const SYSTEM_PERSONALITY = `You are a concise, accurate Discord AI assistant.
@@ -40,7 +40,7 @@ async function getAIResponse(conversationHistory) {
             ...conversationHistory
         ],
         model: MODEL_NAME,
-        temperature: 0.1, // Near-zero temperature for strict factual accuracy
+        temperature: 0.1, // Near-zero temperature forces strict factual accuracy
         max_tokens: 300
     });
 
@@ -48,7 +48,7 @@ async function getAIResponse(conversationHistory) {
 }
 
 client.on('messageCreate', async (message) => {
-    // Ignore self-messages
+    // Prevent infinite loops by ignoring bot self-messages
     if (message.author.id === client.user.id) return;
 
     try {
@@ -63,7 +63,7 @@ client.on('messageCreate', async (message) => {
             conversationHistory.push({ role, content: msg.content });
         });
 
-        // 2. Generate response via GPT-4o-mini
+        // 2. Generate response via GitHub Models GPT-4o-mini
         let responseText = await getAIResponse(conversationHistory);
 
         if (responseText) {
