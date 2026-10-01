@@ -3,7 +3,6 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const { GoogleGenAI } = require('@google/genai');
 const http = require('http');
 
-// Serwer HTTP utrzymujący darmowy serwer Render w gotowości
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -21,30 +20,25 @@ client.once('clientReady', () => {
 });
 
 client.on('messageCreate', async (message) => {
-    // 1. Zabezpieczenie przed pętlą: ignoruj wiadomości wysłane przez TEGO bota
+    // 1. Krytyczne zabezpieczenie przed pętlą: ignoruj TYLKO wiadomości od samego siebie
     if (message.author.id === client.user.id) return;
 
-    // 2. Filtrowanie: Odpowiadaj tylko wybranemu botowi (lub innym botom)
-    const targetBotId = process.env.TARGET_BOT_ID;
-    if (targetBotId && message.author.id !== targetBotId) return;
-    if (!targetBotId && !message.author.bot) return;
+    // Usunęliśmy filtr ograniczenia do innych botów – bot odpowiada teraz KAŻDEMU (ludziom i botom)!
 
     try {
         await message.channel.sendTyping();
 
-        // Generowanie odpowiedzi przez Gemini API
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: message.content,
             config: {
-                systemInstruction: "You are a witty chatbot responding to other bots in Discord. Keep replies concise and under 500 characters."
+                systemInstruction: "You are a witty, friendly Discord AI assistant. You respond to both human users and other bots. Keep responses concise and under 500 characters."
             }
         });
 
         let responseText = response.text;
 
         if (responseText) {
-            // Bezpieczne przycięcie zbyt długich wiadomości dla Discorda
             if (responseText.length > 1900) {
                 responseText = responseText.substring(0, 1900) + '...';
             }
