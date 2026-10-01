@@ -8,15 +8,18 @@ http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PO
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
+// Lock strictly to the high-accuracy 70B model to eliminate 8B hallucinations
+const HIGH_QUALITY_MODEL = 'llama-3.3-70b-versatile';
+
 // =========================================================================
-// 🎭 EDIT PERSONALITY & MEMORY RULES HERE
+// 🎭 EDIT PERSONALITY & RULES HERE
 // =========================================================================
-const SYSTEM_PERSONALITY = `You are a witty, concise Discord AI assistant. 
+const SYSTEM_PERSONALITY = `You are a smart, accurate Discord AI assistant.
 RULES:
-1. ALWAYS reply in English unless specifically requested otherwise.
-2. Focus strictly on answering the USER'S LATEST MESSAGE. Use past messages ONLY for immediate context.
-3. Do not bleed topics or information from past conversation into new, unrelated questions.
-4. Keep responses brief and under 400 characters.`;
+1. ALWAYS reply strictly in English unless explicitly asked otherwise.
+2. Be factually accurate and truthful. If you do not know something, say so instead of guessing.
+3. Focus strictly on answering the USER'S LATEST MESSAGE. Use past messages ONLY for immediate context.
+4. Keep responses brief, clear, and under 400 characters.`;
 // =========================================================================
 
 const client = new Client({
@@ -32,55 +35,31 @@ client.once('clientReady', () => {
 });
 
 async function getGroqResponse(conversationHistory) {
-    let modelList = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
-    try {
-        const response = await groq.models.list();
-        if (response?.data?.length > 0) {
-            const activeModels = response.data
-                .map(m => m.id)
-                .filter(id => !id.includes('whisper') && !id.includes('guard'));
-            if (activeModels.length > 0) modelList = activeModels;
-        }
-    } catch (e) {
-        // Fallback to default model array
-    }
+    // Directly invoke the 70B model with low temperature for factual precision
+    const completion = await groq.chat.completions.create({
+        messages: [
+            { role: 'system', content: SYSTEM_PERSONALITY },
+            ...conversationHistory
+        ],
+        model: HIGH_QUALITY_MODEL,
+        temperature: 0.2, // Very low temperature forces strictly grounded, non-creative answers
+        max_tokens: 400
+    });
 
-    let lastError = null;
-
-    for (const modelName of modelList) {
-        try {
-            const completion = await groq.chat.completions.create({
-                messages: [
-                    { role: 'system', content: SYSTEM_PERSONALITY },
-                    ...conversationHistory
-                ],
-                model: modelName,
-                temperature: 0.5, // Lower temperature reduces topic bleeding and hallucinations
-                max_tokens: 400
-            });
-
-            const text = completion.choices[0]?.message?.content;
-            if (text) return text;
-        } catch (err) {
-            console.warn(`[Groq] Model ${modelName} failed, trying next...`);
-            lastError = err;
-        }
-    }
-
-    throw lastError || new Error('All available Groq models failed.');
+    return completion.choices[0]?.message?.content;
 }
 
 client.on('messageCreate', async (message) => {
-    // Prevent infinite loops
+    // Ignore self-messages to prevent loops
     if (message.author.id === client.user.id) return;
 
     try {
         await message.channel.sendTyping();
 
-        // 1. Fetch only the last 4 messages to keep memory focused on the immediate context
-        const pastMessages = await message.channel.messages.fetch({ limit: 4 });
+        // Fetch only the last 3 messages to avoid mixing up old chat context
+        const pastMessages = await message.channel.messages.fetch({ limit: 3 });
         
-        // 2. Format chronological conversation history
+        // Format chronological conversation history
         const conversationHistory = [];
         pastMessages.reverse().forEach(msg => {
             if (!msg.content) return;
@@ -88,7 +67,7 @@ client.on('messageCreate', async (message) => {
             conversationHistory.push({ role, content: msg.content });
         });
 
-        // 3. Generate response
+        // Generate response using strictly 70B
         let responseText = await getGroqResponse(conversationHistory);
 
         if (responseText) {
@@ -99,7 +78,12 @@ client.on('messageCreate', async (message) => {
         }
     } catch (err) {
         console.error('Error running bot:', err);
-        await message.reply(`⚠️ ${err.message || 'Error generating response.'}`);
+        
+        if (err.status === 429) {
+            await message.reply('⚠️ Rate limit reached on 70B model. Please wait a few seconds.');
+        } else {
+            await message.reply(`⚠️ Error: ${err.message || 'Could not generate response.'}`);
+        }
     }
 });
 
