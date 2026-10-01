@@ -6,11 +6,11 @@ const http = require('http');
 // Keep Render free instance awake
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
-// Initialize using Cohere V2 Client
 const cohere = new CohereClientV2({
     token: process.env.COHERE_API_KEY,
 });
 
+// Primary model for Cohere v2 API
 const MODEL_NAME = 'command-a-plus-05-2026';
 
 const SYSTEM_PERSONALITY = `You are a concise, strictly factual Discord AI assistant.
@@ -49,10 +49,22 @@ async function getAIResponse(conversationHistory) {
         maxTokens: 300,
     });
 
-    // Extract text safely from v2 content array
-    const textOutput = response.message?.content?.[0]?.text;
-    if (!textOutput) {
-        throw new Error("Received empty text output from AI model.");
+    // Safely parse content array across different v2 block types
+    let textOutput = '';
+    
+    if (response.message?.content && Array.isArray(response.message.content)) {
+        for (const block of response.message.content) {
+            if (block.type === 'text' && block.text) {
+                textOutput += block.text;
+            } else if (block.text) {
+                textOutput += block.text;
+            }
+        }
+    }
+
+    if (!textOutput.trim()) {
+        console.error("Full API response object:", JSON.stringify(response, null, 2));
+        throw new Error("Received empty text output from Cohere API.");
     }
 
     return textOutput;
