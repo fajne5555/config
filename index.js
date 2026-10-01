@@ -10,14 +10,55 @@ const cohere = new CohereClientV2({
     token: process.env.COHERE_API_KEY,
 });
 
-// Primary model for Cohere v2 API
 const MODEL_NAME = 'command-a-plus-05-2026';
 
-const SYSTEM_PERSONALITY = `You are a concise, strictly factual Discord AI assistant.
+const SYSTEM_PERSONALITY = `You are a helpful Discord AI assistant with access to real-time web search.
 RULES:
 1. ALWAYS respond strictly in English.
-2. Be 100% factually accurate. When asked about game mechanics, stats, or builds that you do not have verified data for (such as Deepwoken), state clearly: "I don't have exact database stats for that game's build system." NEVER invent fake RPG item names or stats.
-3. Keep responses brief, clear, and under 500 characters.`;
+2. If asked about current events, live information, or specific game stats/builds you do not know natively, use the web_search tool to verify facts.
+3. Keep responses concise and under 1000 characters.`;
+
+// Define the Web Search tool schema for Cohere v2
+const webSearchTool = {
+    type: "function",
+    function: {
+        name: "web_search",
+        description: "Search the web for up-to-date information, news, game stats, or facts.",
+        parameters: {
+            type: "object",
+            properties: {
+                query: {
+                    type: "string",
+                    description: "The search engine query."
+                }
+            },
+            required: ["query"]
+        }
+    }
+};
+
+// Simple web fetcher helper (uses DuckDuckGo HTML scraping or standard search endpoint)
+async function performWebSearch(query) {
+    try {
+        const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+        const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+        });
+        const html = await res.text();
+        
+        // Extract basic snippets from results
+        const snippets = [];
+        const regex = /<a class="result__snippet[^>]*>(.*?)<\/a>/g;
+        let match;
+        while ((match = regex.exec(html)) !== null && snippets.length < 3) {
+            snippets.push(match[1].replace(/<[^>]+>/g, '').trim());
+        }
+        
+        return snippets.length > 0 ? snippets.join('\n') : "No relevant search results found.";
+    } catch (err) {
+        return "Search failed due to network error.";
+    }
+}
 
 const client = new Client({
     intents: [
@@ -42,28 +83,53 @@ async function getAIResponse(conversationHistory) {
         }))
     ];
 
-    const response = await cohere.chat({
+    // Step 1: Call Cohere with tools enabled
+    let response = await cohere.chat({
         model: MODEL_NAME,
         messages: messages,
+        tools: [webSearchTool],
         temperature: 0.1,
-        maxTokens: 300,
     });
 
-    // Safely parse content array across different v2 block types
+    // Step 2: Handle Tool Calls if Cohere requests a web search
+    if (response.message?.toolCalls && response.message.toolCalls.length > 0) {
+        // Append Cohere's assistant message with tool calls to history
+        messages.push(response.message);
+
+        for (const toolCall of response.message.toolCalls) {
+            if (toolCall.function?.name === 'web_search') {
+                const args = JSON.parse(toolCall.function.arguments || '{}');
+                console.log(`[Tool Call] Searching web for: "${args.query}"`);
+                
+                const searchResults = await performWebSearch(args.query);
+
+                // Pass search results back to Cohere
+                messages.push({
+                    role: 'tool',
+                    toolCallId: toolCall.id,
+                    content: searchResults
+                });
+            }
+        }
+
+        // Step 3: Call Cohere again with search results included to generate final text
+        response = await cohere.chat({
+            model: MODEL_NAME,
+            messages: messages,
+            tools: [webSearchTool],
+            temperature: 0.1,
+        });
+    }
+
+    // Parse final text response
     let textOutput = '';
-    
     if (response.message?.content && Array.isArray(response.message.content)) {
         for (const block of response.message.content) {
-            if (block.type === 'text' && block.text) {
-                textOutput += block.text;
-            } else if (block.text) {
-                textOutput += block.text;
-            }
+            if (block.text) textOutput += block.text;
         }
     }
 
     if (!textOutput.trim()) {
-        console.error("Full API response object:", JSON.stringify(response, null, 2));
         throw new Error("Received empty text output from Cohere API.");
     }
 
