@@ -1,14 +1,12 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { GoogleGenAI } = require('@google/genai');
 const http = require('http');
 
+// Simple HTTP endpoint to keep Render awake via UptimeRobot
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
-// Fallback model list to guarantee an active endpoint works
-const MODEL_NAMES = ['gemini-1.5-flash-latest', 'gemini-pro', 'gemini-1.5-pro-latest'];
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 const client = new Client({
     intents: [
@@ -23,39 +21,31 @@ client.once('clientReady', () => {
 });
 
 client.on('messageCreate', async (message) => {
-    // Ignore messages from this bot itself to prevent infinite loops
+    // Prevent infinite loops by ignoring the bot's own messages
     if (message.author.id === client.user.id) return;
 
     try {
         await message.channel.sendTyping();
 
-        let responseText = null;
-        let lastError = null;
-
-        // Try available models until one succeeds
-        for (const modelName of MODEL_NAMES) {
-            try {
-                const model = genAI.getGenerativeModel({ model: modelName });
-                const result = await model.generateContent(message.content);
-                responseText = result.response.text();
-                if (responseText) break;
-            } catch (err) {
-                lastError = err;
-                console.warn(`Model ${modelName} failed, trying next...`);
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: message.content,
+            config: {
+                systemInstruction: "You are a witty, concise Discord AI assistant. Keep responses under 500 characters."
             }
-        }
+        });
+
+        let responseText = response.text;
 
         if (responseText) {
             if (responseText.length > 1900) {
                 responseText = responseText.substring(0, 1900) + '...';
             }
             await message.reply(responseText);
-        } else {
-            console.error('All models failed:', lastError);
-            await message.reply(`⚠️ Gemini Error: ${lastError?.message || 'Could not fetch response.'}`);
         }
     } catch (err) {
         console.error('Error running bot:', err);
+        await message.reply(`⚠️ Error generating response: ${err.message}`);
     }
 });
 
