@@ -3,6 +3,7 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const { CohereClientV2 } = require('cohere-ai');
 const http = require('http');
 
+// Keep Render web service awake
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
 const cohere = new CohereClientV2({
@@ -16,8 +17,7 @@ const SYSTEM_PERSONALITY = `You are a strictly factual assistant for game mechan
 RULES:
 1. ALWAYS respond strictly in English.
 2. NEVER invent fake builds, item names, talent stats, or mechanics.
-3. ALWAYS use the web_search tool when asked about items, game builds, stats, or mechanics.
-4. If the search context does not explicitly list the requested item stats or mechanics, state clearly: "I couldn't find specific database details for that in the game wiki search results."`;
+3. ALWAYS use the web_search tool when asked about items, game builds, stats, or mechanics.`;
 
 const webSearchTool = {
     type: "function",
@@ -60,7 +60,6 @@ async function fetchWikiPageContent(domain, query) {
             .replace(/\s+/g, ' ')
             .trim();
 
-        // Truncate to 1200 chars to avoid overloading Cohere's output parser
         return `[Source: ${domain} - Page: ${topResult.title}]\n${cleanText.substring(0, 1200)}`;
     } catch (e) {
         return null;
@@ -78,7 +77,7 @@ async function performWebSearch(query) {
         if (deadlocked) return deadlocked;
     }
 
-    if (q.includes('deepwoken') || q.includes('build') || q.includes('talent') || q.includes('mantra')) {
+    if (q.includes('deepwoken') || q.includes('build') || q.includes('talent') || q.includes('mantra') || q.includes('shadowcast')) {
         const deepwokenFandom = await fetchWikiPageContent('deepwoken.fandom.com', query);
         if (deepwokenFandom) return deepwokenFandom;
     }
@@ -93,7 +92,6 @@ async function performWebSearch(query) {
 function extractCohereText(response) {
     let output = '';
     
-    // Check message content array
     if (response.message?.content && Array.isArray(response.message.content)) {
         for (const block of response.message.content) {
             if (block.type === 'text' && block.text) {
@@ -104,7 +102,6 @@ function extractCohereText(response) {
         }
     }
     
-    // Fallback check for single text string field
     if (!output && typeof response.message?.content === 'string') {
         output = response.message.content;
     }
@@ -142,83 +139,7 @@ async function getAIResponse(conversationHistory) {
         temperature: 0.0,
     });
 
-    if (response.message?.toolCalls && response.message.toolCalls.length > 0) {
-        messages.push(response.message);
-
-        for (const toolCall of response.message.toolCalls) {
-            if (toolCall.function?.name === 'web_search') {
-                let args = {};
-                try {
-                    args = typeof toolCall.function.arguments === 'string' 
-                        ? JSON.parse(toolCall.function.arguments) 
-                        : toolCall.function.arguments;
-                } catch (e) { args = { query: '' }; }
-
-                console.log(`[Wiki Fetching] Query: "${args.query}"`);
-                const searchResults = await performWebSearch(args.query);
-
-                messages.push({
-                    role: 'tool',
-                    toolCallId: toolCall.id,
-                    content: searchResults
-                });
-            }
-        }
-
-        // Second API call following tool execution
-        response = await cohere.chat({
-            model: MODEL_NAME,
-            messages: messages,
-            tools: [webSearchTool],
-            temperature: 0.0,
-        });
-    }
-
-    const textOutput = extractCohereText(response);
-
-    if (!textOutput) {
-        console.error("Empty text error payload debug:", JSON.stringify(response, null, 2));
-        return "I retrieved the wiki page, but I couldn't extract direct factual details for that specific query.";
-    }
-
-    return textOutput;
-}
-
-client.on('messageCreate', async (message) => {
-    if (message.author.id === client.user.id) return;
-
-    try {
-        await message.channel.sendTyping();
-
-        const pastMessages = await message.channel.messages.fetch({ limit: 3 });
-        const conversationHistory = [];
-        pastMessages.reverse().forEach(msg => {
-            if (!msg.content) return;
-            const role = msg.author.id === client.user.id ? 'assistant' : 'user';
-            conversationHistory.push({ role, content: msg.content });
-        });
-
-    async function getAIResponse(conversationHistory) {
-    if (!process.env.COHERE_API_KEY) {
-        throw new Error("Missing COHERE_API_KEY environment variable in Render.");
-    }
-
-    const messages = [
-        { role: 'system', content: SYSTEM_PERSONALITY },
-        ...conversationHistory.map(msg => ({
-            role: msg.role === 'assistant' ? 'assistant' : 'user',
-            content: msg.content
-        }))
-    ];
-
-    let response = await cohere.chat({
-        model: MODEL_NAME,
-        messages: messages,
-        tools: [webSearchTool],
-        temperature: 0.0,
-    });
-
-    // Loop to support multi-step tool calls (e.g. Cohere refining its search query)
+    // Handle multi-step tool calls (e.g. Cohere refining its search query)
     let turns = 0;
     const maxTurns = 3;
 
@@ -246,7 +167,7 @@ client.on('messageCreate', async (message) => {
             }
         }
 
-        // Execute follow-up request to Cohere
+        // Trigger follow-up Cohere completion after feeding back search result
         response = await cohere.chat({
             model: MODEL_NAME,
             messages: messages,
@@ -263,3 +184,33 @@ client.on('messageCreate', async (message) => {
 
     return textOutput;
 }
+
+client.on('messageCreate', async (message) => {
+    if (message.author.id === client.user.id) return;
+
+    try {
+        await message.channel.sendTyping();
+
+        const pastMessages = await message.channel.messages.fetch({ limit: 3 });
+        const conversationHistory = [];
+        pastMessages.reverse().forEach(msg => {
+            if (!msg.content) return;
+            const role = msg.author.id === client.user.id ? 'assistant' : 'user';
+            conversationHistory.push({ role, content: msg.content });
+        });
+
+        let responseText = await getAIResponse(conversationHistory);
+
+        if (responseText) {
+            if (responseText.length > 1900) {
+                responseText = responseText.substring(0, 1900) + '...';
+            }
+            await message.reply(responseText);
+        }
+    } catch (err) {
+        console.error('Error running bot:', err);
+        await message.reply(`⚠️ Error: ${err.message || 'Could not generate response.'}`);
+    }
+});
+
+client.login(process.env.DISCORD_TOKEN);
