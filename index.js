@@ -6,14 +6,14 @@ const http = require('http');
 // Keep Render free instance awake via UptimeRobot
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
-// Correct GitHub Models API endpoint
+// Initialize OpenAI client pointed to GitHub Models endpoint
 const clientAI = new OpenAI({
     baseURL: "https://models.github.ai/inference",
     apiKey: process.env.GITHUB_TOKEN || process.env.GROQ_API_KEY
 });
 
-// Primary model on GitHub Models
-const MODEL_NAME = "gpt-4o-mini";
+// Full model identifier required by GitHub Models API
+const MODEL_NAME = "openai/gpt-4o-mini";
 
 const SYSTEM_PERSONALITY = `You are a concise, accurate Discord AI assistant.
 RULES:
@@ -43,6 +43,10 @@ async function getAIResponse(conversationHistory) {
         temperature: 0.1, // Near-zero temperature forces strict factual accuracy
         max_tokens: 300
     });
+
+    if (!completion.choices || completion.choices.length === 0) {
+        throw new Error("Received empty response choices from GitHub Models.");
+    }
 
     return completion.choices[0]?.message?.content;
 }
