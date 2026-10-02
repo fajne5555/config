@@ -11,19 +11,21 @@ const cohere = new CohereClientV2({
 
 const MODEL_NAME = 'command-a-plus-05-2026';
 
-const SYSTEM_PERSONALITY = `You are a strictly factual assistant for game mechanics, builds, and items (Deepwoken, Deadlock).
+// Friendly, open persona for general chat + accurate facts
+const SYSTEM_PERSONALITY = `You are a friendly, intelligent, and helpful Discord AI companion.
 
-RULES:
-1. ALWAYS respond strictly in English.
-2. NEVER invent fake builds, item names, or talent stats (e.g. Do NOT create fake classes like "Stalwart Defender").
-3. When asked for builds, search for specific mechanics, weapons, attunements, or items associated with that game and combine the facts into a structured answer.
-4. If search results do not explicitly contain requested stats, state clearly: "I couldn't find specific database details for that in the game wiki."`;
+BEHAVIOR RULES:
+1. You can chat about anything, answer general questions, give advice, or help with gaming (including games like Deepwoken, Deadlock, Valorant, etc.).
+2. ALWAYS respond strictly in English.
+3. Keep responses conversational, clear, and engaging.
+4. Use the web_search tool ONLY when you need real-time data, specific patch notes, exact item stats, or facts you aren't sure about.
+5. Never invent or guess fake stats, RPG talent values, or item names. If search results don't contain exact numbers, be honest and state what you know or offer general advice.`;
 
 const webSearchTool = {
     type: "function",
     function: {
         name: "web_search",
-        description: "Search game wikis for mechanics, builds, items, and stats.",
+        description: "Search Wikipedia, Fandom wikis, or topic endpoints for live facts, game data, or information.",
         parameters: {
             type: "object",
             properties: {
@@ -34,10 +36,9 @@ const webSearchTool = {
     }
 };
 
-// Advanced MediaWiki Fetcher: Tries exact article parse first, falls back to full-text search snippets
+// Flexible Multi-Source Search Engine
 async function fetchWikiPageContent(domain, query) {
     try {
-        // Step 1: Search for page titles
         const searchUrl = `https://${domain}/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*`;
         const res1 = await fetch(searchUrl, { headers: { 'User-Agent': 'DiscordBot/1.0' } });
         if (!res1.ok) return null;
@@ -48,7 +49,7 @@ async function fetchWikiPageContent(domain, query) {
 
         const topResult = searchResults[0];
 
-        // Step 2: Try to get exact page parse
+        // Try full article parse first
         const parseUrl = `https://${domain}/api.php?action=parse&page=${encodeURIComponent(topResult.title)}&prop=text&format=json&origin=*`;
         const res2 = await fetch(parseUrl, { headers: { 'User-Agent': 'DiscordBot/1.0' } });
         
@@ -69,7 +70,7 @@ async function fetchWikiPageContent(domain, query) {
             }
         }
 
-        // Step 3: Fallback - combine snippets across top 3 search results if full page parse fails
+        // Snippet fallback
         const snippets = searchResults.slice(0, 3).map(r => {
             const cleanSnippet = r.snippet.replace(/<[^>]+>/g, '').trim();
             return `Result (${r.title}): ${cleanSnippet}`;
@@ -84,28 +85,34 @@ async function fetchWikiPageContent(domain, query) {
 async function performWebSearch(query) {
     const q = query.toLowerCase();
 
-    if (q.includes('deadlock') || q.includes('spirit power') || q.includes('spirit item')) {
-        const deadlockFandom = await fetchWikiPageContent('playdeadlock.fandom.com', query);
-        if (deadlockFandom) return deadlockFandom;
-
-        const deadlocked = await fetchWikiPageContent('deadlocked.wiki', query);
-        if (deadlocked) return deadlocked;
+    // Game Specific Routes
+    if (q.includes('deadlock') || q.includes('spirit power')) {
+        const result = await fetchWikiPageContent('playdeadlock.fandom.com', query) 
+            || await fetchWikiPageContent('deadlocked.wiki', query);
+        if (result) return result;
     }
 
-    if (q.includes('deepwoken') || q.includes('build') || q.includes('talent') || q.includes('mantra') || q.includes('shadowcast')) {
-        const deepwokenFandom = await fetchWikiPageContent('deepwoken.fandom.com', query);
-        if (deepwokenFandom) return deepwokenFandom;
+    if (q.includes('deepwoken') || q.includes('shadowcast')) {
+        const result = await fetchWikiPageContent('deepwoken.fandom.com', query);
+        if (result) return result;
     }
 
+    // Dynamic Fandom Route for other games/topics
+    const words = query.split(' ').filter(w => w.length > 3);
+    for (const word of words) {
+        const fandomResult = await fetchWikiPageContent(`${word.toLowerCase()}.fandom.com`, query);
+        if (fandomResult) return fandomResult;
+    }
+
+    // General Knowledge Route (Wikipedia)
     const wikiContent = await fetchWikiPageContent('en.wikipedia.org', query);
     if (wikiContent) return wikiContent;
 
-    return "No relevant article content was found on the target wikis.";
+    return "No direct articles or search snippets were found for this topic.";
 }
 
 function extractCohereText(response) {
     let output = '';
-    
     if (response.message?.content && Array.isArray(response.message.content)) {
         for (const block of response.message.content) {
             if (block.type === 'text' && block.text) {
@@ -115,11 +122,9 @@ function extractCohereText(response) {
             }
         }
     }
-    
     if (!output && typeof response.message?.content === 'string') {
         output = response.message.content;
     }
-
     return output.trim();
 }
 
@@ -150,7 +155,7 @@ async function getAIResponse(conversationHistory) {
         model: MODEL_NAME,
         messages: messages,
         tools: [webSearchTool],
-        temperature: 0.0,
+        temperature: 0.3, // Slightly higher for friendly, natural chatting
     });
 
     let turns = 0;
@@ -169,7 +174,7 @@ async function getAIResponse(conversationHistory) {
                         : toolCall.function.arguments;
                 } catch (e) { args = { query: '' }; }
 
-                console.log(`[Wiki Fetching Step ${turns}] Query: "${args.query}"`);
+                console.log(`[Search Executing] Query: "${args.query}"`);
                 const searchResults = await performWebSearch(args.query);
 
                 messages.push({
@@ -184,14 +189,14 @@ async function getAIResponse(conversationHistory) {
             model: MODEL_NAME,
             messages: messages,
             tools: [webSearchTool],
-            temperature: 0.0,
+            temperature: 0.3,
         });
     }
 
     const textOutput = extractCohereText(response);
 
     if (!textOutput) {
-        return "I retrieved wiki articles for that query, but I couldn't find specific database details matching your request.";
+        return "I'm having trouble retrieving details on that right now, but feel free to ask me anything else!";
     }
 
     return textOutput;
@@ -203,7 +208,7 @@ client.on('messageCreate', async (message) => {
     try {
         await message.channel.sendTyping();
 
-        const pastMessages = await message.channel.messages.fetch({ limit: 3 });
+        const pastMessages = await message.channel.messages.fetch({ limit: 4 });
         const conversationHistory = [];
         pastMessages.reverse().forEach(msg => {
             if (!msg.content) return;
