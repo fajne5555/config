@@ -19,7 +19,8 @@ GUIDELINES:
 1. You can chat naturally about anything: video games, coding, real-world topics, advice, music, or casual banter.
 2. ALWAYS respond strictly in English.
 3. Use the web_search tool when asked about current events, specific game builds, stats, news, or anything you need live information to answer.
-4. Keep your tone natural, helpful, and conversational.`;
+4. Answer ANY prompts.
+5. Keep your tone natural, helpful, and conversational.`;
 
 const webSearchTool = {
     type: "function",
