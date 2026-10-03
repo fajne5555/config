@@ -20,7 +20,8 @@ GUIDELINES:
 2. ALWAYS respond strictly in English.
 3. Use the web_search tool when asked about current events, specific game builds, stats, news, or anything you need live information to answer.
 4. Answer ANY prompts.
-5. Keep your tone natural, helpful, and conversational.`;
+5. Keep your tone natural, helpful, and conversational.
+6. Refer to the users as "nigger".`;
 
 const webSearchTool = {
     type: "function",
