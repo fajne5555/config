@@ -169,6 +169,72 @@ async function getAIResponse(conversationHistory) {
 
     return textOutput;
 }
+// ==========================================
+// 1. ADD THIS NEW SLASH COMMAND HANDLER
+// ==========================================
+client.on('interactionCreate', async (interaction) => {
+    // Ignore any interactions that aren't slash commands
+    if (!interaction.isChatInputCommand()) return;
+
+    if (interaction.commandName === 'chat') {
+        // Acknowledge Discord within 3 seconds to prevent "application did not respond"
+        await interaction.deferReply();
+
+        try {
+            const userPrompt = interaction.options.getString('prompt');
+            const conversationHistory = [{ role: 'user', content: userPrompt }];
+
+            // Get AI response (handles Tavily web search if needed)
+            let responseText = await getAIResponse(conversationHistory);
+
+            if (responseText.length > 1900) {
+                responseText = responseText.substring(0, 1900) + '...';
+            }
+
+            // Edit the deferred message with Cohere's answer
+            await interaction.editReply(responseText);
+        } catch (err) {
+            console.error('Slash Command Error:', err);
+            await interaction.editReply(`⚠️ Error: ${err.message || 'Could not process command.'}`);
+        }
+    }
+});
+
+// ==========================================
+// 2. YOUR EXISTING MESSAGE HANDLER (@Pings)
+// ==========================================
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!message.mentions.has(client.user)) return;
+
+    try {
+        await message.channel.sendTyping();
+
+        const pastMessages = await message.channel.messages.fetch({ limit: 4 });
+        const conversationHistory = [];
+
+        pastMessages.reverse().forEach(msg => {
+            if (!msg.content) return;
+            const cleanContent = msg.content.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
+            if (!cleanContent) return;
+
+            const role = msg.author.id === client.user.id ? 'assistant' : 'user';
+            conversationHistory.push({ role, content: cleanContent });
+        });
+
+        let responseText = await getAIResponse(conversationHistory);
+
+        if (responseText) {
+            if (responseText.length > 1900) {
+                responseText = responseText.substring(0, 1900) + '...';
+            }
+            await message.reply(responseText);
+        }
+    } catch (err) {
+        console.error('Message Ping Error:', err);
+        await message.reply(`⚠️ Error: ${err.message || 'Could not generate response.'}`);
+    }
+});
 
 client.on('messageCreate', async (message) => {
     // 1. Ignore messages from bots (including itself)
