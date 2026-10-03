@@ -3,6 +3,7 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const { CohereClientV2 } = require('cohere-ai');
 const http = require('http');
 
+// Simple keep-alive server for Render
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
 
 const cohere = new CohereClientV2({
@@ -11,104 +12,69 @@ const cohere = new CohereClientV2({
 
 const MODEL_NAME = 'command-a-plus-05-2026';
 
-// Friendly, open persona for general chat + accurate facts
-const SYSTEM_PERSONALITY = `You are a friendly, intelligent, and helpful Discord AI companion.
+// Completely relaxed, general-purpose system prompt
+const SYSTEM_PERSONALITY = `You are an open-minded, intelligent, friendly, and helpful Discord AI companion.
 
-BEHAVIOR RULES:
-1. You can chat about anything, answer general questions, give advice, or help with gaming (including games like Deepwoken, Deadlock, Valorant, etc.).
+GUIDELINES:
+1. You can chat naturally about anything: video games, coding, real-world topics, advice, music, or casual banter.
 2. ALWAYS respond strictly in English.
-3. Keep responses conversational, clear, and engaging.
-4. Use the web_search tool ONLY when you need real-time data, specific patch notes, exact item stats, or facts you aren't sure about.
-5. Never invent or guess fake stats, RPG talent values, or item names. If search results don't contain exact numbers, be honest and state what you know or offer general advice.`;
+3. Use the web_search tool when asked about current events, specific game builds, stats, news, or anything you need live information to answer.
+4. Keep your tone natural, helpful, and conversational.`;
 
 const webSearchTool = {
     type: "function",
     function: {
         name: "web_search",
-        description: "Search Wikipedia, Fandom wikis, or topic endpoints for live facts, game data, or information.",
+        description: "Search the entire live internet for any topic, query, game build, news, or live information.",
         parameters: {
             type: "object",
             properties: {
-                query: { type: "string", description: "Search query" }
+                query: { type: "string", description: "The search query" }
             },
             required: ["query"]
         }
     }
 };
 
-// Flexible Multi-Source Search Engine
-async function fetchWikiPageContent(domain, query) {
+// Open Web Search using Tavily (or Serper fallback)
+async function performWebSearch(query) {
+    const apiKey = process.env.TAVILY_API_KEY;
+    
+    if (!apiKey) {
+        console.error("Missing TAVILY_API_KEY in environment variables.");
+        return "Search functionality is currently offline because the API key is missing.";
+    }
+
     try {
-        const searchUrl = `https://${domain}/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*`;
-        const res1 = await fetch(searchUrl, { headers: { 'User-Agent': 'DiscordBot/1.0' } });
-        if (!res1.ok) return null;
-        
-        const data1 = await res1.json();
-        const searchResults = data1.query?.search;
-        if (!searchResults || searchResults.length === 0) return null;
-
-        const topResult = searchResults[0];
-
-        // Try full article parse first
-        const parseUrl = `https://${domain}/api.php?action=parse&page=${encodeURIComponent(topResult.title)}&prop=text&format=json&origin=*`;
-        const res2 = await fetch(parseUrl, { headers: { 'User-Agent': 'DiscordBot/1.0' } });
-        
-        if (res2.ok) {
-            const data2 = await res2.json();
-            const rawHtml = data2.parse?.text?.['*'];
-            if (rawHtml) {
-                const cleanText = rawHtml
-                    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-                    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-                    .replace(/<[^>]+>/g, ' ')
-                    .replace(/\s+/g, ' ')
-                    .trim();
-
-                if (cleanText.length > 100) {
-                    return `[Source: ${domain} - Page: ${topResult.title}]\n${cleanText.substring(0, 1200)}`;
-                }
-            }
-        }
-
-        // Snippet fallback
-        const snippets = searchResults.slice(0, 3).map(r => {
-            const cleanSnippet = r.snippet.replace(/<[^>]+>/g, '').trim();
-            return `Result (${r.title}): ${cleanSnippet}`;
+        const response = await fetch('https://api.tavily.com/search', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                api_key: apiKey,
+                query: query,
+                search_depth: "basic",
+                max_results: 5
+            })
         });
 
-        return `[Source: ${domain} Snippets]\n${snippets.join('\n\n')}`;
-    } catch (e) {
-        return null;
+        if (!response.ok) {
+            return "Unable to retrieve web search results at the moment.";
+        }
+
+        const data = await response.json();
+        
+        if (!data.results || data.results.length === 0) {
+            return "No search results found on the internet for this topic.";
+        }
+
+        // Format web search results cleanly for Cohere
+        return data.results.map(r => `Title: ${r.title}\nURL: ${r.url}\nContent: ${r.content}`).join('\n\n');
+    } catch (err) {
+        console.error("Web Search Error:", err);
+        return "Search request failed due to a network error.";
     }
-}
-
-async function performWebSearch(query) {
-    const q = query.toLowerCase();
-
-    // Game Specific Routes
-    if (q.includes('deadlock') || q.includes('spirit power')) {
-        const result = await fetchWikiPageContent('playdeadlock.fandom.com', query) 
-            || await fetchWikiPageContent('deadlocked.wiki', query);
-        if (result) return result;
-    }
-
-    if (q.includes('deepwoken') || q.includes('shadowcast')) {
-        const result = await fetchWikiPageContent('deepwoken.fandom.com', query);
-        if (result) return result;
-    }
-
-    // Dynamic Fandom Route for other games/topics
-    const words = query.split(' ').filter(w => w.length > 3);
-    for (const word of words) {
-        const fandomResult = await fetchWikiPageContent(`${word.toLowerCase()}.fandom.com`, query);
-        if (fandomResult) return fandomResult;
-    }
-
-    // General Knowledge Route (Wikipedia)
-    const wikiContent = await fetchWikiPageContent('en.wikipedia.org', query);
-    if (wikiContent) return wikiContent;
-
-    return "No direct articles or search snippets were found for this topic.";
 }
 
 function extractCohereText(response) {
@@ -155,12 +121,13 @@ async function getAIResponse(conversationHistory) {
         model: MODEL_NAME,
         messages: messages,
         tools: [webSearchTool],
-        temperature: 0.3, // Slightly higher for friendly, natural chatting
+        temperature: 0.5, // Natural, flexible balance between creative chat and facts
     });
 
     let turns = 0;
     const maxTurns = 3;
 
+    // Multi-turn tool execution loop
     while (response.finishReason === 'TOOL_CALL' && response.message?.toolCalls?.length > 0 && turns < maxTurns) {
         turns++;
         messages.push(response.message);
@@ -174,7 +141,7 @@ async function getAIResponse(conversationHistory) {
                         : toolCall.function.arguments;
                 } catch (e) { args = { query: '' }; }
 
-                console.log(`[Search Executing] Query: "${args.query}"`);
+                console.log(`[Web Search Step ${turns}] Query: "${args.query}"`);
                 const searchResults = await performWebSearch(args.query);
 
                 messages.push({
@@ -189,14 +156,14 @@ async function getAIResponse(conversationHistory) {
             model: MODEL_NAME,
             messages: messages,
             tools: [webSearchTool],
-            temperature: 0.3,
+            temperature: 0.5,
         });
     }
 
     const textOutput = extractCohereText(response);
 
     if (!textOutput) {
-        return "I'm having trouble retrieving details on that right now, but feel free to ask me anything else!";
+        return "I wasn't able to process that query, but feel free to ask me anything else!";
     }
 
     return textOutput;
