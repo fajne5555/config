@@ -170,17 +170,27 @@ async function getAIResponse(conversationHistory) {
 }
 
 client.on('messageCreate', async (message) => {
-    if (message.author.id === client.user.id) return;
+    // 1. Ignore messages from bots (including itself)
+    if (message.author.bot) return;
+
+    // 2. Only reply if the bot is directly mentioned (@bot) in the message
+    if (!message.mentions.has(client.user)) return;
 
     try {
         await message.channel.sendTyping();
 
+        // Fetch recent messages for context
         const pastMessages = await message.channel.messages.fetch({ limit: 4 });
         const conversationHistory = [];
+
         pastMessages.reverse().forEach(msg => {
             if (!msg.content) return;
+            // Clean out the @mention tag from the prompt string so Cohere sees clean text
+            const cleanContent = msg.content.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
+            if (!cleanContent) return;
+
             const role = msg.author.id === client.user.id ? 'assistant' : 'user';
-            conversationHistory.push({ role, content: msg.content });
+            conversationHistory.push({ role, content: cleanContent });
         });
 
         let responseText = await getAIResponse(conversationHistory);
