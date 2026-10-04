@@ -10,9 +10,19 @@ const commands = [
                 .setDescription('What do you want to ask?')
                 .setRequired(true)
         )
-        // Enable User Installation and usage in DMs/Servers
-        .setIntegrationTypes([0, 1]) // 0: Guild Install, 1: User Install
-        .setContexts([0, 1, 2])      // 0: Guilds, 1: Bot DMs, 2: Private Channels/Group DMs
+        .setIntegrationTypes([0, 1])
+        .setContexts([0, 1, 2]),
+
+    new SlashCommandBuilder()
+        .setName('redeploy')
+        .setDescription('Restart/redeploy the bot container')
+        .addStringOption(option =>
+            option.setName('password')
+                .setDescription('Enter the admin password')
+                .setRequired(true)
+        )
+        .setIntegrationTypes([0, 1])
+        .setContexts([0, 1, 2])
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
