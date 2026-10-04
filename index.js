@@ -173,29 +173,44 @@ async function getAIResponse(conversationHistory) {
 // 1. ADD THIS NEW SLASH COMMAND HANDLER
 // ==========================================
 client.on('interactionCreate', async (interaction) => {
-    // Ignore any interactions that aren't slash commands
     if (!interaction.isChatInputCommand()) return;
 
     if (interaction.commandName === 'chat') {
-        // Acknowledge Discord within 3 seconds to prevent "application did not respond"
         await interaction.deferReply();
-
         try {
             const userPrompt = interaction.options.getString('prompt');
-            const conversationHistory = [{ role: 'user', content: userPrompt }];
-
-            // Get AI response (handles Tavily web search if needed)
-            let responseText = await getAIResponse(conversationHistory);
-
-            if (responseText.length > 1900) {
-                responseText = responseText.substring(0, 1900) + '...';
-            }
-
-            // Edit the deferred message with Cohere's answer
-            await interaction.editReply(responseText);
+            const responseText = await getAIResponse([{ role: 'user', content: userPrompt }]);
+            await interaction.editReply(responseText.length > 1900 ? responseText.substring(0, 1900) + '...' : responseText);
         } catch (err) {
-            console.error('Slash Command Error:', err);
-            await interaction.editReply(`⚠️ Error: ${err.message || 'Could not process command.'}`);
+            await interaction.editReply(`⚠️ Error: ${err.message}`);
+        }
+    } 
+    
+    // NEW REDEPLOY COMMAND HANDLER
+    else if (interaction.commandName === 'redeploy') {
+        const password = interaction.options.getString('password');
+
+        if (password !== 'tung') {
+            await interaction.reply({ content: '❌ Incorrect password.', ephemeral: true });
+            return;
+        }
+
+        const deployHookUrl = process.env.RENDER_DEPLOY_HOOK;
+        if (!deployHookUrl) {
+            await interaction.reply({ content: '❌ Render deploy hook is not configured in environment variables.', ephemeral: true });
+            return;
+        }
+
+        await interaction.reply({ content: '🔄 Password accepted! Triggering a full Render redeploy...', ephemeral: true });
+
+        try {
+            // Send POST request to Render to trigger a fresh build & restart
+            const res = await fetch(deployHookUrl, { method: 'POST' });
+            if (!res.ok) {
+                console.error('Failed to trigger Render deploy hook');
+            }
+        } catch (err) {
+            console.error('Redeploy request error:', err);
         }
     }
 });
