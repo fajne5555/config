@@ -30,8 +30,6 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
 (async () => {
     try {
         console.log('Registering global slash commands...');
-        
-        // Fetch Client ID dynamically from bot token or set process.env.CLIENT_ID
         const clientUser = await rest.get(Routes.user());
         
         await rest.put(
@@ -39,7 +37,7 @@ const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
             { body: commands }
         );
 
-        console.log('Successfully registered global /chat slash command!');
+        console.log('Successfully registered global slash commands!');
     } catch (error) {
         console.error('Error registering slash commands:', error);
     }
