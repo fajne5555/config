@@ -1,5 +1,3 @@
-console.log('🚀 Script is starting up...');
-
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 const { CohereClientV2 } = require('cohere-ai');
@@ -9,9 +7,14 @@ const http = require('http');
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000, () => {
     console.log('HTTP server successfully listening on port:', process.env.PORT || 3000);
 });
+
+// Initialize Cohere Client properly
+const cohere = new CohereClientV2({
+    token: process.env.COHERE_API_KEY,
+});
+
 const MODEL_NAME = 'command-a-plus-05-2026';
 
-// Completely relaxed, general-purpose system prompt
 const SYSTEM_PERSONALITY = `You are an open-minded, intelligent, friendly, and helpful Discord AI companion.
 
 GUIDELINES:
@@ -36,21 +39,16 @@ const webSearchTool = {
     }
 };
 
-// Open Web Search using Tavily (or Serper fallback)
 async function performWebSearch(query) {
     const apiKey = process.env.TAVILY_API_KEY;
-    
     if (!apiKey) {
-        console.error("Missing TAVILY_API_KEY in environment variables.");
         return "Search functionality is currently offline because the API key is missing.";
     }
 
     try {
         const response = await fetch('https://api.tavily.com/search', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 api_key: apiKey,
                 query: query,
@@ -59,17 +57,11 @@ async function performWebSearch(query) {
             })
         });
 
-        if (!response.ok) {
-            return "Unable to retrieve web search results at the moment.";
-        }
+        if (!response.ok) return "Unable to retrieve web search results at the moment.";
 
         const data = await response.json();
-        
-        if (!data.results || data.results.length === 0) {
-            return "No search results found on the internet for this topic.";
-        }
+        if (!data.results || data.results.length === 0) return "No search results found on the internet for this topic.";
 
-        // Format web search results cleanly for Cohere
         return data.results.map(r => `Title: ${r.title}\nURL: ${r.url}\nContent: ${r.content}`).join('\n\n');
     } catch (err) {
         console.error("Web Search Error:", err);
@@ -102,8 +94,6 @@ const client = new Client({
     ]
 });
 
-client.once('clientReady', () => console.log(`Bot online as ${client.user.tag}`));
-
 async function getAIResponse(conversationHistory) {
     if (!process.env.COHERE_API_KEY) {
         throw new Error("Missing COHERE_API_KEY environment variable in Render.");
@@ -121,13 +111,12 @@ async function getAIResponse(conversationHistory) {
         model: MODEL_NAME,
         messages: messages,
         tools: [webSearchTool],
-        temperature: 0.5, // Natural, flexible balance between creative chat and facts
+        temperature: 0.5,
     });
 
     let turns = 0;
     const maxTurns = 3;
 
-    // Multi-turn tool execution loop
     while (response.finishReason === 'TOOL_CALL' && response.message?.toolCalls?.length > 0 && turns < maxTurns) {
         turns++;
         messages.push(response.message);
@@ -161,16 +150,10 @@ async function getAIResponse(conversationHistory) {
     }
 
     const textOutput = extractCohereText(response);
-
-    if (!textOutput) {
-        return "I wasn't able to process that query, but feel free to ask me anything else!";
-    }
-
-    return textOutput;
+    return textOutput || "I wasn't able to process that query, but feel free to ask me anything else!";
 }
-// ==========================================
-// 1. ADD THIS NEW SLASH COMMAND HANDLER
-// ==========================================
+
+// Slash Command Handler
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
@@ -184,8 +167,6 @@ client.on('interactionCreate', async (interaction) => {
             await interaction.editReply(`⚠️ Error: ${err.message}`);
         }
     } 
-    
-    // NEW REDEPLOY COMMAND HANDLER
     else if (interaction.commandName === 'redeploy') {
         const password = interaction.options.getString('password');
 
@@ -203,20 +184,14 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.reply({ content: '🔄 Password accepted! Triggering a full Render redeploy...', ephemeral: true });
 
         try {
-            // Send POST request to Render to trigger a fresh build & restart
-            const res = await fetch(deployHookUrl, { method: 'POST' });
-            if (!res.ok) {
-                console.error('Failed to trigger Render deploy hook');
-            }
+            await fetch(deployHookUrl, { method: 'POST' });
         } catch (err) {
             console.error('Redeploy request error:', err);
         }
     }
 });
 
-// ==========================================
-// 2. YOUR EXISTING MESSAGE HANDLER (@Pings)
-// ==========================================
+// Single Message Ping Handler (cleaned up duplication)
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.mentions.has(client.user)) return;
@@ -250,52 +225,11 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-client.on('messageCreate', async (message) => {
-    // 1. Ignore messages from bots (including itself)
-    if (message.author.bot) return;
-
-    // 2. Only reply if the bot is directly mentioned (@bot) in the message
-    if (!message.mentions.has(client.user)) return;
-
-    try {
-        await message.channel.sendTyping();
-
-        // Fetch recent messages for context
-        const pastMessages = await message.channel.messages.fetch({ limit: 4 });
-        const conversationHistory = [];
-
-        pastMessages.reverse().forEach(msg => {
-            if (!msg.content) return;
-            // Clean out the @mention tag from the prompt string so Cohere sees clean text
-            const cleanContent = msg.content.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
-            if (!cleanContent) return;
-
-            const role = msg.author.id === client.user.id ? 'assistant' : 'user';
-            conversationHistory.push({ role, content: cleanContent });
-        });
-
-        let responseText = await getAIResponse(conversationHistory);
-
-        if (responseText) {
-            if (responseText.length > 1900) {
-                responseText = responseText.substring(0, 1900) + '...';
-            }
-            await message.reply(responseText);
-        }
-    } catch (err) {
-        console.error('Error running bot:', err);
-        await message.reply(`⚠️ Error: ${err.message || 'Could not generate response.'}`);
-    }
-});
-// Put this right before client.login
 client.once('ready', () => {
     console.log(`🤖 Logged in successfully as ${client.user.tag}! Ready to handle commands.`);
 });
 
-// Clean login block with explicit catch
+// Single login call with proper error catching
 client.login(process.env.DISCORD_TOKEN)
     .then(() => console.log('Login request sent successfully.'))
     .catch(err => console.error('CRITICAL LOGIN ERROR:', err));
-
-client.login(process.env.DISCORD_TOKEN);
-
