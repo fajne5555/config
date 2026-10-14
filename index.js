@@ -1,3 +1,14 @@
+console.log('🚀 Script is starting up...');
+
+require('dotenv').config();
+const { Client, GatewayIntentBits } = require('discord.js');
+const { CohereClientV2 } = require('cohere-ai');
+const http = require('http');
+
+// Simple keep-alive server for Render
+http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000, () => {
+    console.log('HTTP server successfully listening on port:', process.env.PORT || 3000);
+});
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 const { CohereClientV2 } = require('cohere-ai');
