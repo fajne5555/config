@@ -290,3 +290,12 @@ client.on('messageCreate', async (message) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+
+client.once('clientReady', () => {
+    console.log(`✅ Success! Bot is fully logged in as ${client.user.tag}`);
+});
+
+// Catch login errors explicitly so Render logs show the real reason
+client.login(process.env.DISCORD_TOKEN).catch(err => {
+    console.error('❌ Failed to login to Discord:', err);
+});
