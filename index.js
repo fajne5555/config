@@ -191,7 +191,7 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// Single Message Ping Handler (cleaned up duplication)
+// Message Ping Handler (@Pings)
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (!message.mentions.has(client.user)) return;
@@ -225,7 +225,7 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// Ensure these lines are present at the absolute bottom of index.js
+// Ready and Login Sequence
 client.once('ready', () => {
     console.log(`🤖 Logged in successfully as ${client.user.tag}! Ready to handle commands.`);
 });
