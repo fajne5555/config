@@ -225,6 +225,7 @@ client.on('messageCreate', async (message) => {
     }
 });
 
+// Ensure these lines are present at the absolute bottom of index.js
 client.once('ready', () => {
     console.log(`🤖 Logged in successfully as ${client.user.tag}! Ready to handle commands.`);
 });
