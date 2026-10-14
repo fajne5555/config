@@ -225,11 +225,13 @@ client.on('messageCreate', async (message) => {
     }
 });
 
+// Ensure this is at the very bottom of index.js
 client.once('ready', () => {
     console.log(`🤖 Logged in successfully as ${client.user.tag}! Ready to handle commands.`);
 });
 
+console.log('Attempting to connect to Discord with token length:', process.env.DISCORD_TOKEN ? process.env.DISCORD_TOKEN.length : 'UNDEFINED');
+
 client.login(process.env.DISCORD_TOKEN)
     .then(() => console.log('Login request sent successfully to Discord.'))
     .catch(err => console.error('CRITICAL LOGIN ERROR:', err));
-// Single login call with proper error catching
