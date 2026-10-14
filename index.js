@@ -288,14 +288,15 @@ client.on('messageCreate', async (message) => {
         await message.reply(`⚠️ Error: ${err.message || 'Could not generate response.'}`);
     }
 });
+// Put this right before client.login
+client.once('ready', () => {
+    console.log(`🤖 Logged in successfully as ${client.user.tag}! Ready to handle commands.`);
+});
+
+// Clean login block with explicit catch
+client.login(process.env.DISCORD_TOKEN)
+    .then(() => console.log('Login request sent successfully.'))
+    .catch(err => console.error('CRITICAL LOGIN ERROR:', err));
 
 client.login(process.env.DISCORD_TOKEN);
 
-client.once('clientReady', () => {
-    console.log(`✅ Success! Bot is fully logged in as ${client.user.tag}`);
-});
-
-// Catch login errors explicitly so Render logs show the real reason
-client.login(process.env.DISCORD_TOKEN).catch(err => {
-    console.error('❌ Failed to login to Discord:', err);
-});
