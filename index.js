@@ -9,18 +9,6 @@ const http = require('http');
 http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000, () => {
     console.log('HTTP server successfully listening on port:', process.env.PORT || 3000);
 });
-require('dotenv').config();
-const { Client, GatewayIntentBits } = require('discord.js');
-const { CohereClientV2 } = require('cohere-ai');
-const http = require('http');
-
-// Simple keep-alive server for Render
-http.createServer((req, res) => res.end('Bot is active!')).listen(process.env.PORT || 3000);
-
-const cohere = new CohereClientV2({
-    token: process.env.COHERE_API_KEY,
-});
-
 const MODEL_NAME = 'command-a-plus-05-2026';
 
 // Completely relaxed, general-purpose system prompt
