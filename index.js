@@ -225,13 +225,24 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// Ready and Login Sequence
 client.once('ready', () => {
     console.log(`🤖 Logged in successfully as ${client.user.tag}! Ready to handle commands.`);
 });
 
 console.log('Attempting to connect to Discord with token length:', process.env.DISCORD_TOKEN ? process.env.DISCORD_TOKEN.length : 'UNDEFINED');
 
+// Add error handling and catch connection hangs
 client.login(process.env.DISCORD_TOKEN)
-    .then(() => console.log('Login request sent successfully to Discord.'))
-    .catch(err => console.error('CRITICAL LOGIN ERROR:', err));
+    .then(() => {
+        console.log('Login request sent successfully to Discord.');
+    })
+    .catch(err => {
+        console.error('❌ CRITICAL LOGIN ERROR:', err);
+    });
+
+// Failsafe timeout to see if the network is hanging
+setTimeout(() => {
+    if (!client.isReady()) {
+        console.warn('⚠️ WARNING: Discord client has not connected after 15 seconds. The network socket might be blocked or timing out.');
+    }
+}, 15000);
